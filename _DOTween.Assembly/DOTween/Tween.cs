@@ -33,6 +33,9 @@ namespace DG.Tweening
         public int intId = -999;
         /// <summary>Tween target (usable for filtering with DOTween static methods). Automatically set by tween creation shorcuts</summary>
         public object target; // Automatically set by DO shortcuts using SetTarget extension. Also used during Tweener.DoStartup in some special cases
+
+      public string targetName;
+
         // Update type and eventual independence (changed via TweenManager.SetUpdateType)
         internal UpdateType updateType;
         internal bool isIndependentUpdate;

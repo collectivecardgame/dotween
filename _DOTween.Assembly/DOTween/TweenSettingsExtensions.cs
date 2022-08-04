@@ -94,6 +94,19 @@ namespace DG.Tweening
             if (t == null || !t.active) return t;
 
             t.target = target;
+          switch (target) {
+              case Transform transform:
+                t.targetName = transform.gameObject.name;
+                break;
+              case GameObject gameObject:
+                t.targetName = gameObject.name;
+                break;
+              case null:
+                break;
+              default:
+                t.targetName = target.ToString();
+                break;
+          }
             return t;
         }
 

@@ -84,8 +84,26 @@ namespace DG.Tweening
                 }
             }
 
-            t.getter = getter;
-            t.setter = setter;
+            t.getter = () => {
+              try {
+                return getter();
+              } catch (Exception) {
+                if (t is Tween tween) {
+                  Debug.LogError($"Getter Error in {tween.targetName ?? "<not set>"}");
+                }
+                throw;
+              }
+            };
+            t.setter = v => {
+              try {
+                setter(v);
+              } catch (Exception) {
+                if (t is Tween tween) {
+                  Debug.LogError($"Setter Error in {tween.targetName ?? "<not set>"}");
+                }
+                throw;
+              }
+            };
             t.endValue = endValue;
             t.duration = duration;
             // Defaults
