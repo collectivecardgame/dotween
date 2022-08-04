@@ -55,10 +55,15 @@ namespace DG.Tweening
                 if (Debugger.logPriority > 1) Debugger.LogNestedTween(t); return;
             }
 
-//            TweenManager.Complete(t, true, withCallbacks ? UpdateMode.Update : UpdateMode.Goto);
-            UpdateMode updateMode = TweenManager.isUpdateLoop ? UpdateMode.IgnoreOnComplete
-                : withCallbacks ? UpdateMode.Update : UpdateMode.Goto;
-            TweenManager.Complete(t, true, updateMode);
+            // Previously disused in favor of bottom code because otherwise OnComplete was called twice when fired inside am OnUpdate call,
+            // but that created another recent issue where events (OnComplete and any other) weren't called anymore
+            // if called from another tween's internal callbacks.
+            // Reinstated because thanks to other fixes this now works correctly
+            TweenManager.Complete(t, true, withCallbacks ? UpdateMode.Update : UpdateMode.Goto);
+            // See above note for reason why this was commented
+            // UpdateMode updateMode = TweenManager.isUpdateLoop ? UpdateMode.IgnoreOnComplete
+            //     : withCallbacks ? UpdateMode.Update : UpdateMode.Goto;
+            // TweenManager.Complete(t, true, updateMode);
         }
 
         /// <summary>Flips the direction of this tween (backwards if it was going forward or viceversa)</summary>
@@ -94,6 +99,14 @@ namespace DG.Tweening
         /// (if higher than the whole tween duration the tween will simply reach its end)</param>
         /// <param name="andPlay">If TRUE will play the tween after reaching the given position, otherwise it will pause it</param>
         public static void Goto(this Tween t, float to, bool andPlay = false)
+        { DoGoto(t, to, andPlay, false); }
+        /// <summary>Send the tween to the given position in time while also executing any callback between the previous time position and the new one</summary>
+        /// <param name="to">Time position to reach
+        /// (if higher than the whole tween duration the tween will simply reach its end)</param>
+        /// <param name="andPlay">If TRUE will play the tween after reaching the given position, otherwise it will pause it</param>
+        public static void GotoWithCallbacks(this Tween t, float to, bool andPlay = false)
+        { DoGoto(t, to, andPlay, true); }
+        static void DoGoto(Tween t, float to, bool andPlay, bool withCallbacks)
         {
             if (t == null) {
                 if (Debugger.logPriority > 1) Debugger.LogNullTween(t); return;
@@ -104,13 +117,15 @@ namespace DG.Tweening
             }
 
             if (to < 0) to = 0;
-            TweenManager.Goto(t, to, andPlay);
+            if (!t.startupDone) TweenManager.ForceInit(t); // Initialize the tween if it's not initialized already (required)
+            TweenManager.Goto(t, to, andPlay, withCallbacks ? UpdateMode.Update : UpdateMode.Goto);
         }
 
         /// <summary>Kills the tween</summary>
         /// <param name="complete">If TRUE completes the tween before killing it</param>
         public static void Kill(this Tween t, bool complete = false)
         {
+            if (!DOTween.initialized) return;
             if (t == null) {
                 if (Debugger.logPriority > 1) Debugger.LogNullTween(t); return;
             } else if (!t.active) {
@@ -128,6 +143,27 @@ namespace DG.Tweening
                 // Just mark it for killing, so the update loop will take care of it
                 t.active = false;
             } else TweenManager.Despawn(t);
+        }
+
+        /// <summary>
+        /// Forces this tween to update manually, regardless of the <see cref="UpdateType"/> set via SetUpdate.
+        /// Note that the tween will still be subject to normal tween rules, so if for example it's paused this method will do nothing.<para/>
+        /// Also note that if you only want to update this tween instance manually you'll have to set it to <see cref="UpdateType.Manual"/> anyway,
+        /// so that it's not updated automatically.
+        /// </summary>
+        /// <param name="deltaTime">Manual deltaTime</param>
+        /// <param name="unscaledDeltaTime">Unscaled delta time (used with tweens set as timeScaleIndependent)</param>
+        public static void ManualUpdate(this Tween t, float deltaTime, float unscaledDeltaTime)
+        {
+            if (t == null) {
+                if (Debugger.logPriority > 1) Debugger.LogNullTween(t); return;
+            } else if (!t.active) {
+                if (Debugger.logPriority > 1) Debugger.LogInvalidTween(t); return;
+            } else if (t.isSequenced) {
+                if (Debugger.logPriority > 1) Debugger.LogNestedTween(t); return;
+            }
+
+            TweenManager.Update(t, deltaTime, unscaledDeltaTime, true);
         }
 
         /// <summary>Pauses the tween</summary>
@@ -189,8 +225,8 @@ namespace DG.Tweening
         }
 
         /// <summary>Restarts the tween from the beginning</summary>
-        /// <param name="includeDelay">If TRUE includes the eventual tween delay, otherwise skips it</param>
-        /// <param name="changeDelayTo">If >= 0 changes the startup delay to this value, otherwise doesn't touch it</param>
+        /// <param name="includeDelay">Ignored in case of Sequences. If TRUE includes the eventual tween delay, otherwise skips it</param>
+        /// <param name="changeDelayTo">Ignored in case of Sequences. If >= 0 changes the startup delay to this value, otherwise doesn't touch it</param>
         public static void Restart(this Tween t, bool includeDelay = true, float changeDelayTo = -1)
         {
             if (t == null) {
@@ -205,7 +241,7 @@ namespace DG.Tweening
         }
 
         /// <summary>Rewinds and pauses the tween</summary>
-        /// <param name="includeDelay">If TRUE includes the eventual tween delay, otherwise skips it</param>
+        /// <param name="includeDelay">Ignored in case of Sequences. If TRUE includes the eventual tween delay, otherwise skips it</param>
         public static void Rewind(this Tween t, bool includeDelay = true)
         {
             if (t == null) {
@@ -284,7 +320,7 @@ namespace DG.Tweening
             for (int i = 0; i < waypointIndex + 1; i++) wpLength += pathTween.changeValue.wpLengths[i];
             float wpPerc = wpLength / pathTween.changeValue.length;
             // Convert to time taking eventual inverse direction into account
-            bool useInversePosition = t.loopType == LoopType.Yoyo
+            bool useInversePosition = t.hasLoops && t.loopType == LoopType.Yoyo
                 && (t.position < t.duration ? t.completedLoops % 2 != 0 : t.completedLoops % 2 == 0);
             if (useInversePosition) wpPerc = 1 - wpPerc;
             float to = (t.isComplete ? t.completedLoops - 1 : t.completedLoops) * t.duration + wpPerc * t.duration;
@@ -416,6 +452,17 @@ namespace DG.Tweening
             return t.delay;
         }
 
+        /// <summary>Returns the eventual elapsed delay set for this tween</summary>
+        public static float ElapsedDelay(this Tween t)
+        {
+            if (!t.active) {
+                if (Debugger.logPriority > 0) Debugger.LogInvalidTween(t);
+                return 0;
+            }
+
+            return t.elapsedDelay;
+        }
+
         /// <summary>Returns the duration of this tween (delays excluded).
         /// <para>NOTE: when using settings like SpeedBased, the duration will be recalculated when the tween starts</para></summary>
         /// <param name="includeLoops">If TRUE returns the full duration loops included,
@@ -476,18 +523,19 @@ namespace DG.Tweening
             }
 
             float perc = t.position / t.duration;
-            bool isInverse = t.completedLoops > 0 && t.loopType == LoopType.Yoyo && (!t.isComplete && t.completedLoops % 2 != 0 || t.isComplete && t.completedLoops % 2 == 0);
+            bool isInverse = t.completedLoops > 0 && t.hasLoops && t.loopType == LoopType.Yoyo
+                             && (!t.isComplete && t.completedLoops % 2 != 0 || t.isComplete && t.completedLoops % 2 == 0);
             return isInverse ? 1 - perc : perc;
         }
 
-        /// <summary>Returns FALSE if this tween has been killed.
+        /// <summary>Returns FALSE if this tween has been killed or is NULL, TRUE otherwise.
         /// <para>BEWARE: if this tween is recyclable it might have been spawned again for another use and thus return TRUE anyway.</para>
         /// When working with recyclable tweens you should take care to know when a tween has been killed and manually set your references to NULL.
         /// If you want to be sure your references are set to NULL when a tween is killed you can use the <code>OnKill</code> callback like this:
         /// <para><code>.OnKill(()=> myTweenReference = null)</code></para></summary>
         public static bool IsActive(this Tween t)
         {
-            return t.active;
+            return t != null && t.active;
         }
 
         /// <summary>Returns TRUE if this tween was reversed and is set to go backwards</summary>
@@ -573,7 +621,7 @@ namespace DG.Tweening
             if (pathTween == null) {
                 if (Debugger.logPriority > 1) Debugger.LogNonPathTween(t); return Vector3.zero;
             } else if (!pathTween.endValue.isFinalized) {
-                if (Debugger.logPriority > 1) Debugger.LogWarning("The path is not finalized yet"); return Vector3.zero;
+                if (Debugger.logPriority > 1) Debugger.LogWarning("The path is not finalized yet", t); return Vector3.zero;
             }
 
             return pathTween.endValue.GetPoint(pathPercentage, true);
@@ -602,7 +650,7 @@ namespace DG.Tweening
             if (pathTween == null) {
                 if (Debugger.logPriority > 1) Debugger.LogNonPathTween(t); return null;
             } else if (!pathTween.endValue.isFinalized) {
-                if (Debugger.logPriority > 1) Debugger.LogWarning("The path is not finalized yet"); return null;
+                if (Debugger.logPriority > 1) Debugger.LogWarning("The path is not finalized yet", t); return null;
             }
 
             return Path.GetDrawPoints(pathTween.endValue, subdivisionsXSegment);
@@ -628,7 +676,7 @@ namespace DG.Tweening
             if (pathTween == null) {
                 if (Debugger.logPriority > 1) Debugger.LogNonPathTween(t); return -1;
             } else if (!pathTween.endValue.isFinalized) {
-                if (Debugger.logPriority > 1) Debugger.LogWarning("The path is not finalized yet"); return -1;
+                if (Debugger.logPriority > 1) Debugger.LogWarning("The path is not finalized yet", t); return -1;
             }
 
             return pathTween.endValue.length;

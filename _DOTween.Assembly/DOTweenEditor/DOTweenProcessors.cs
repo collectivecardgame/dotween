@@ -6,6 +6,7 @@
 using System.IO;
 using DG.DOTweenEditor.UI;
 using DG.Tweening;
+using DG.Tweening.Core;
 using UnityEditor;
 using UnityEngine;
 
@@ -59,33 +60,44 @@ namespace DG.DOTweenEditor
         {
             if (_setupDialogRequested) return;
 
-            string[] dotweenEntries = System.Array.FindAll(importedAssets, name => name.Contains("DOTween") && !name.EndsWith(".meta") && !name.EndsWith(".jpg") && !name.EndsWith(".png"));
-            bool dotweenImported = dotweenEntries.Length > 0;
-            if (!dotweenImported) return;
+            string dotweenFile = System.Array.Find(
+                importedAssets, name => name.Contains("DOTween") && !name.EndsWith(".meta") && !name.EndsWith(".jpg") && !name.EndsWith(".png")
+            );
+            bool dotweenImported = dotweenFile != null;
+            if (dotweenImported) {
+                // DOTween or Pro or Timeline imported
+                // Reapply modules and ASMDEF
+                EditorUtils.DelayedCall(0.1f, ()=> {
+                    // Debug.Log("Apply Modules Settings after DOTween reimport (" + dotweenFile + ")");
+                    DOTweenUtilityWindowModules.ApplyModulesSettings();
+                    ASMDEFManager.ApplyASMDEFSettings();
+                    // ASMDEFManager.RefreshExistingASMDEFFiles();
+                });
+            }
 
-            // Reapply modules
-            DOTweenUtilityWindowModules.ApplyModulesSettings();
-
-//            // Delete old DOTween files
-//            EditorUtils.DeleteLegacyNoModulesDOTweenFiles();
-//            // Delete old DemiLib configuration
-//            EditorUtils.DeleteOldDemiLibCore();
-//            // Remove old legacy defines
-//            DOTweenDefines.RemoveAllLegacyDefines();
-//            // Reapply modules
-//            DOTweenUtilityWindowModules.ApplyModulesSettings();
-//            //
-//            bool differentCoreVersion = EditorPrefs.GetString(Application.dataPath + DOTweenUtilityWindow.Id) != Application.dataPath + DOTween.Version;
-//            bool differentProVersion = EditorUtils.hasPro && EditorPrefs.GetString(Application.dataPath + DOTweenUtilityWindow.IdPro) != Application.dataPath + EditorUtils.proVersion;
-//            bool setupRequired = differentCoreVersion || differentProVersion;
-//            if (!setupRequired) return;
+//             string dotweenProFile = System.Array.Find(
+//                 importedAssets, name => name.Contains("DOTweenPro") && !name.EndsWith(".meta") && !name.EndsWith(".jpg") && !name.EndsWith(".png")
+//             );
+//             bool dotweenProImported = dotweenProFile != null;
+//             if (dotweenProImported) {
+//                 // Refresh ASMDEF
+//                 EditorUtils.DelayedCall(0.1f, ()=> {
+// //                    Debug.Log("Refresh ASMDEF after DOTweenPro reimport (" + dotweenProFile + ")");
+//                     ASMDEFManager.RefreshExistingASMDEFFiles();
+//                 });
+//             }
 //
-//            _setupDialogRequested = true;
-//            EditorPrefs.SetString(Application.dataPath + DOTweenUtilityWindow.Id, Application.dataPath + DOTween.Version);
-//            if (EditorUtils.hasPro) {
-//                EditorPrefs.SetString(Application.dataPath + DOTweenUtilityWindow.IdPro, Application.dataPath + EditorUtils.proVersion);
-//            }
-//            DOTweenUtilityWindow.Open();
+//             string dotweenTimelineFile = System.Array.Find(
+//                 importedAssets, name => name.Contains("DOTweenTimeline") && !name.EndsWith(".meta") && !name.EndsWith(".jpg") && !name.EndsWith(".png")
+//             );
+//             bool dotweenTimelineImported = dotweenTimelineFile != null;
+//             if (dotweenTimelineImported) {
+//                 // Reapply modules
+//                 EditorUtils.DelayedCall(0.1f, ()=> {
+// //                    Debug.Log("Apply Modules Settings after DOTweenTimeline reimport (" + dotweenTimelineFile + ")");
+//                     DOTweenUtilityWindowModules.ApplyModulesSettings();
+//                 });
+//             }
         }
     }
 }

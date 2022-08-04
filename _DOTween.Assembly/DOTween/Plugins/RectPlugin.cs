@@ -39,6 +39,31 @@ namespace DG.Tweening.Plugins
             }
             t.setter(to);
         }
+        public override void SetFrom(TweenerCore<Rect, Rect, RectOptions> t, Rect fromValue, bool setImmediately, bool isRelative)
+        {
+            if (isRelative) {
+                Rect currVal = t.getter();
+                t.endValue.x += currVal.x;
+                t.endValue.y += currVal.y;
+                t.endValue.width += currVal.width;
+                t.endValue.height += currVal.height;
+                fromValue.x += currVal.x;
+                fromValue.y += currVal.y;
+                fromValue.width += currVal.width;
+                fromValue.height += currVal.height;
+            }
+            t.startValue = fromValue;
+            if (setImmediately) {
+                Rect to = fromValue;
+                if (t.plugOptions.snapping) {
+                    to.x = (float)Math.Round(to.x);
+                    to.y = (float)Math.Round(to.y);
+                    to.width = (float)Math.Round(to.width);
+                    to.height = (float)Math.Round(to.height);
+                }
+                t.setter(to);
+            }
+        }
 
         public override Rect ConvertToStartValue(TweenerCore<Rect, Rect, RectOptions> t, Rect value)
         {
@@ -72,8 +97,11 @@ namespace DG.Tweening.Plugins
             return diag / unitsXSecond;
         }
 
-        public override void EvaluateAndApply(RectOptions options, Tween t, bool isRelative, DOGetter<Rect> getter, DOSetter<Rect> setter, float elapsed, Rect startValue, Rect changeValue, float duration, bool usingInversePosition, UpdateNotice updateNotice)
-        {
+        public override void EvaluateAndApply(
+            RectOptions options, Tween t, bool isRelative, DOGetter<Rect> getter, DOSetter<Rect> setter,
+            float elapsed, Rect startValue, Rect changeValue, float duration, bool usingInversePosition, int newCompletedSteps,
+            UpdateNotice updateNotice
+        ){
             if (t.loopType == LoopType.Incremental) {
                 int iterations = t.isComplete ? t.completedLoops - 1 : t.completedLoops;
                 startValue.x += changeValue.x * iterations;

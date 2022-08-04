@@ -1,6 +1,8 @@
 ﻿// Author: Daniele Giardini - http://www.demigiant.com
 // Created: 2014/12/24 13:37
 
+using System;
+using System.Collections.Generic;
 using System.IO;
 using DG.Tweening;
 using DG.Tweening.Core;
@@ -10,13 +12,30 @@ using UnityEngine;
 
 namespace DG.DOTweenEditor.UI
 {
-    class DOTweenUtilityWindow : EditorWindow
+    public class DOTweenUtilityWindow : EditorWindow
     {
+        #region Events
+
+        public static event Action<bool> OnRequestDOTweenProMissingScriptsFix;
+        public static event Action<bool> OnRequestDOTweenTimelineMissingScriptsFix;
+
+        static void Dispatch_OnRequestDOTweenProMissingScriptsFix(bool currentSceneOnly)
+        {
+            if (OnRequestDOTweenProMissingScriptsFix != null) OnRequestDOTweenProMissingScriptsFix(currentSceneOnly);
+        }
+
+        static void Dispatch_OnRequestDOTweenTimelineMissingScriptsFix(bool currentSceneOnly)
+        {
+            if (OnRequestDOTweenTimelineMissingScriptsFix != null) OnRequestDOTweenTimelineMissingScriptsFix(currentSceneOnly);
+        }
+
+        #endregion
+
         [MenuItem("Tools/Demigiant/" + _Title)]
         static void ShowWindow() { Open(); }
 		
         const string _Title = "DOTween Utility Panel";
-        static readonly Vector2 _WinSize = new Vector2(370,490);
+        static readonly Vector2 _WinSize = new Vector2(370,650);
         public const string Id = "DOTweenVersion";
         public const string IdPro = "DOTweenProVersion";
         static readonly float _HalfBtSize = _WinSize.x * 0.5f - 6;
@@ -27,9 +46,10 @@ namespace DG.DOTweenEditor.UI
         Vector2 _headerSize, _footerSize;
         string _innerTitle;
         bool _setupRequired;
+        Vector2 _scrollVal;
 
         int _selectedTab;
-        string[] _tabLabels = new[] { "Setup", "Preferences" };
+        string[] _tabLabels = new[] { "Setup", "Preferences", "Utilities" };
         string[] _settingsLocation = new[] {"Assets > Resources", "DOTween > Resources", "Demigiant > Resources"};
 
         // If force is FALSE opens the window only if DOTween's version has changed
@@ -37,6 +57,7 @@ namespace DG.DOTweenEditor.UI
         // NOTE: this is also called via Reflection by UpgradeWindow
         public static void Open()
         {
+            EditorUtils.RetrieveDependenciesData(true);
             DOTweenUtilityWindow window = EditorWindow.GetWindow<DOTweenUtilityWindow>(true, _Title, true);
             window.minSize = _WinSize;
             window.maxSize = _WinSize;
@@ -80,6 +101,8 @@ namespace DG.DOTweenEditor.UI
 #endif
             if (EditorUtils.hasPro) _innerTitle += "\nDOTweenPro v" + EditorUtils.proVersion;
             else _innerTitle += "\nDOTweenPro not installed";
+            if (EditorUtils.hasDOTweenTimeline) _innerTitle += "\nDOTweenTimeline v" + EditorUtils.dotweenTimelineVersion;
+            else _innerTitle += "\nDOTweenTimeline not installed";
 
             Init();
 
@@ -112,6 +135,7 @@ namespace DG.DOTweenEditor.UI
                 GUILayout.Space(40);
                 GUILayout.EndHorizontal();
             } else {
+                _scrollVal = GUILayout.BeginScrollView(_scrollVal);
                 if (_src.modules.showPanel) {
                     if (DOTweenUtilityWindowModules.Draw(this, _src)) {
                         _setupRequired = EditorUtils.DOTweenSetupRequired();
@@ -124,13 +148,20 @@ namespace DG.DOTweenEditor.UI
 
                     switch (_selectedTab) {
                     case 1:
+                        float labelW = EditorGUIUtility.labelWidth;
+                        EditorGUIUtility.labelWidth = 160;
                         DrawPreferencesGUI();
+                        EditorGUIUtility.labelWidth = labelW;
+                        break;
+                    case 2:
+                        DrawUtilsGUI();
                         break;
                     default:
                         DrawSetupGUI();
                         break;
                     }
                 }
+                GUILayout.EndScrollView();
             }
 
             if (GUI.changed) EditorUtility.SetDirty(_src);
@@ -154,42 +185,116 @@ namespace DG.DOTweenEditor.UI
                 GUI.backgroundColor = Color.white;
             } else GUILayout.Space(8);
             GUI.color = Color.green;
-            GUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("<b>Setup DOTween...</b>\n(add/remove Modules)", EditorGUIUtils.btSetup)) {
+            using (new GUILayout.HorizontalScope()) {
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("<b>Setup DOTween...</b>\n(add/remove Modules)", EditorGUIUtils.btSetup, GUILayout.Width(200))) {
 //                DOTweenDefines.Setup();
 //                _setupRequired = EditorUtils.DOTweenSetupRequired();
-                DOTweenUtilityWindowModules.ApplyModulesSettings();
-                _src.modules.showPanel = true;
-                EditorUtility.SetDirty(_src);
-                EditorUtils.DeleteLegacyNoModulesDOTweenFiles();
-                DOTweenDefines.RemoveAllLegacyDefines();
-                EditorUtils.DeleteDOTweenUpgradeManagerFiles();
-                return;
+                    DOTweenUtilityWindowModules.ApplyModulesSettings();
+                    ASMDEFManager.ApplyASMDEFSettings();
+                    _src.modules.showPanel = true;
+                    EditorUtility.SetDirty(_src);
+                    EditorUtils.DeleteLegacyNoModulesDOTweenFiles();
+                    DOTweenDefines.RemoveAllLegacyDefines();
+                    EditorUtils.DeleteDOTweenUpgradeManagerFiles();
+                    // ► Timeline is now a separate thing
+                    // if (EditorUtils.hasDOTweenTimelineUnityPackage && EditorUtils.isValidDOTweenTimelineUnityVersion) {
+                    //     EditorUtils.DelayedCall(0.1f, ()=> {
+                    //         bool unpackTimeline = EditorUtility.DisplayDialog("Install DOTweenTimeline",
+                    //             "Import the most recent version of DOTweenTimeline?\n\nIf you select \"Yes\" please wait for Unity compilation to end" +
+                    //             " before pressing \"Import\" in the next screen.",
+                    //             "Yes", "Skip"
+                    //         );
+                    //         if (unpackTimeline) AssetDatabase.ImportPackage(EditorUtils.dotweenTimelineUnityPackageFilePath, true);
+                    //     });
+                    // }
+                    return;
+                }
+                GUILayout.FlexibleSpace();
             }
-            GUILayout.FlexibleSpace();
             GUI.color = Color.white;
-            GUILayout.EndHorizontal();
-            GUILayout.Space(8);
+            GUILayout.Space(4);
 
-//            EditorGUILayout.HelpBox(
-//                "NOTE: if you get \"Requested build target group (N) doesn't exist\" or [CS0618] errors during the setup don't worry: it's ok and allows the setup to work on all possible Unity versions",
-//                MessageType.Info
-//            );
+            // DOTweenTimeline (now a separate thing so this button is removed)
+            // if (EditorUtils.hasDOTweenTimelineUnityPackage) {
+            //     using (new GUILayout.HorizontalScope()) {
+            //         GUILayout.FlexibleSpace();
+            //         if (GUILayout.Button("<b>Import DOTweenTimeline</b>\n<b>-[ EXPERIMENTAL ]-</b>\n(requires Unity 2018.4.24 or later)", EditorGUIUtils.btSetup, GUILayout.Width(200))) {
+            //             if (!EditorUtils.isValidDOTweenTimelineUnityVersion) {
+            //                 EditorUtility.DisplayDialog("Import DOTweenTimeline",
+            //                     "Sorry, you need to be on Unity 2018.4 or later in order to import DOTweenTimeline.",
+            //                     "Ooops"
+            //                 );
+            //             } else if (EditorUtility.DisplayDialog("Import DOTweenTimeline",
+            //                 "DOTweenTimeline requires Unity 2018.4.24 or later. Do not import it if you're on earlier versions." +
+            //                 "\n\nProceed and import?",
+            //                 "Ok", "Cancel"
+            //             )) {
+            //                 AssetDatabase.ImportPackage(EditorUtils.dotweenTimelineUnityPackageFilePath, true);
+            //             }
+            //         }
+            //         GUILayout.FlexibleSpace();
+            //     }
+            //     GUILayout.Space(4);
+            // }
 
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Website", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/index.php");
-            if (GUILayout.Button("Get Started", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/getstarted.php");
-            GUILayout.EndHorizontal();
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Documentation", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/documentation.php");
-            if (GUILayout.Button("Support", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/support.php");
-            GUILayout.EndHorizontal();
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Changelog", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/download.php");
-            if (GUILayout.Button("Check Updates", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/download.php?v=" + DOTween.Version);
-            GUILayout.EndHorizontal();
-            GUILayout.Space(14);
+            // ASMDEF
+            using (new GUILayout.VerticalScope(GUI.skin.box)) {
+                using (new GUILayout.HorizontalScope()) {
+                    GUILayout.FlexibleSpace();
+                    GUI.color = ASMDEFManager.hasModulesASMDEF ? Color.yellow : Color.cyan;
+                    if (GUILayout.Button(ASMDEFManager.hasModulesASMDEF ? "Remove ASMDEF..." : "Create ASMDEF...", EditorGUIUtils.btSetup, GUILayout.Width(200))) {
+                        if (ASMDEFManager.hasModulesASMDEF) {
+                            string msg = "This will remove:\n-DOTween/Modules/DOTween.Modules.asmdef";
+                            if (EditorUtils.hasPro) {
+                                msg += "\n-DOTweenPro/DOTweenPro.Scripts.asmdef" +
+                                       "\n-DOTweenPro/Editor/DOTweenPro.EditorScripts.asmdef";
+                            }
+                            if (EditorUtils.hasDOTweenTimeline) {
+                                msg += "\n-DOTweenTimeline/Scripts/DOTweenTimeline.Scripts.asmdef" +
+                                       "\n-DOTweenTimeline/Scripts/Editor/DOTweenTimeline.EditorScripts.asmdef";
+                            }
+                            if (EditorUtility.DisplayDialog("Remove ASMDEF", msg, "Ok", "Cancel")) ASMDEFManager.RemoveAllASMDEF();
+                        } else {
+                            string msg = "This will create:\n-DOTween/Modules/DOTween.Modules.asmdef";
+                            if (EditorUtils.hasPro) {
+                                msg += "\n-DOTweenPro/DOTweenPro.Scripts.asmdef" +
+                                       "\n-DOTweenPro/Editor/DOTweenPro.EditorScripts.asmdef";
+                            }
+                            if (EditorUtils.hasDOTweenTimeline) {
+                                msg += "\n-DOTweenTimeline/Scripts/DOTweenTimeline.Scripts.asmdef" +
+                                       "\n-DOTweenTimeline/Scripts/Editor/DOTweenTimeline.EditorScripts.asmdef";
+                            }
+                            if (EditorUtility.DisplayDialog("Create ASMDEF", msg, "Ok", "Cancel")) ASMDEFManager.CreateAllASMDEF();
+                        }
+                    }
+                    GUI.color = Color.white;
+                    GUILayout.FlexibleSpace();
+                }
+                GUILayout.Label(
+                    "ASMDEFs are useful if you need to reference the extra DOTween modules API (like [<i>UIelement</i>].DOColor)" +
+                    " from other ASMDEFs/Libraries instead of loose scripts," +
+                    " but remember to have those <b>ASMDEFs/Libraries reference DOTween ones</b>," +
+                    " <b>except for DOTween's Editor ASMDEFs</b> (DOTweenPro.EditorScripts) which <b>must never be referenced</b>" +
+                    " by your runtime code or runtime ASMDEFs.",
+                    EditorGUIUtils.wordWrapRichTextLabelStyle
+                );
+            }
+            GUILayout.Space(3);
+
+            using (new GUILayout.HorizontalScope()) {
+                if (GUILayout.Button("Website", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/index.php");
+                if (GUILayout.Button("Get Started", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/getstarted.php");
+            }
+            using (new GUILayout.HorizontalScope()) {
+                if (GUILayout.Button("Documentation", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/documentation.php");
+                if (GUILayout.Button("Support", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/support.php");
+            }
+            using (new GUILayout.HorizontalScope()) {
+                if (GUILayout.Button("Changelog", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/download.php");
+                if (GUILayout.Button("Check Updates", EditorGUIUtils.btBigStyle, GUILayout.Width(_HalfBtSize))) Application.OpenURL("http://dotween.demigiant.com/download.php?v=" + DOTween.Version);
+            }
+            GUILayout.Space(4);
             if (GUILayout.Button(_footerImg, EditorGUIUtils.btImgStyle)) Application.OpenURL("http://www.demigiant.com/");
         }
 
@@ -199,8 +304,11 @@ namespace DG.DOTweenEditor.UI
             if (GUILayout.Button("Reset", EditorGUIUtils.btBigStyle)) {
                 // Reset to original defaults
                 _src.useSafeMode = true;
+                _src.safeModeOptions.logBehaviour = SafeModeLogBehaviour.Warning;
+                _src.safeModeOptions.nestedTweenFailureBehaviour = NestedTweenFailureBehaviour.TryToPreserveSequence;
                 _src.showUnityEditorReport = false;
                 _src.timeScale = 1;
+                _src.unscaledTimeScale = 1;
                 _src.useSmoothDeltaTime = false;
                 _src.maxSmoothUnscaledTime = 0.15f;
                 _src.rewindCallbackMode = RewindCallbackMode.FireIfPositionChanged;
@@ -215,17 +323,30 @@ namespace DG.DOTweenEditor.UI
                 _src.defaultEasePeriod = 0;
                 _src.defaultAutoKill = true;
                 _src.defaultLoopType = LoopType.Restart;
+                _src.debugMode = false;
+                _src.debugStoreTargetId = true;
                 EditorUtility.SetDirty(_src);
             }
             GUILayout.Space(8);
             _src.useSafeMode = EditorGUILayout.Toggle("Safe Mode", _src.useSafeMode);
+            if (_src.useSafeMode) {
+                _src.safeModeOptions.logBehaviour = (SafeModeLogBehaviour)EditorGUILayout.EnumPopup(
+                    new GUIContent("└ Log Type On Capture", "Type of log to throw when safe mode captures an error"),
+                    _src.safeModeOptions.logBehaviour
+                );
+                _src.safeModeOptions.nestedTweenFailureBehaviour = (NestedTweenFailureBehaviour)EditorGUILayout.EnumPopup(
+                    new GUIContent("└ On Nested Tween Failure", "Behaviour in case a tween inside a Sequence fails"),
+                    _src.safeModeOptions.nestedTweenFailureBehaviour
+                );
+            }
             _src.timeScale = EditorGUILayout.FloatField("DOTween's TimeScale", _src.timeScale);
+            _src.unscaledTimeScale = EditorGUILayout.FloatField("└ Unscaled TimeScale", _src.unscaledTimeScale);
             _src.useSmoothDeltaTime = EditorGUILayout.Toggle("Smooth DeltaTime", _src.useSmoothDeltaTime);
             _src.maxSmoothUnscaledTime = EditorGUILayout.Slider("Max SmoothUnscaledTime", _src.maxSmoothUnscaledTime, 0.01f, 1f);
             _src.rewindCallbackMode = (RewindCallbackMode)EditorGUILayout.EnumPopup("OnRewind Callback Mode", _src.rewindCallbackMode);
             GUILayout.Space(-5);
             GUILayout.BeginHorizontal();
-                GUILayout.Space(154);
+                GUILayout.Space(EditorGUIUtility.labelWidth + 4);
                 EditorGUILayout.HelpBox(
                     _src.rewindCallbackMode == RewindCallbackMode.FireIfPositionChanged
                         ? "When calling Rewind or PlayBackwards/SmoothRewind, OnRewind callbacks will be fired only if the tween isn't already rewinded"
@@ -260,6 +381,60 @@ namespace DG.DOTweenEditor.UI
             _src.defaultEasePeriod = EditorGUILayout.FloatField("Ease Period", _src.defaultEasePeriod);
             _src.defaultAutoKill = EditorGUILayout.Toggle("AutoKill", _src.defaultAutoKill);
             _src.defaultLoopType = (LoopType)EditorGUILayout.EnumPopup("Loop Type", _src.defaultLoopType);
+            GUILayout.Space(8);
+            _src.debugMode = EditorGUIUtils.ToggleButton(_src.debugMode, new GUIContent("DEBUG MODE", "Turns debug mode options on/off"), true);
+            if (_src.debugMode) {
+                GUILayout.BeginVertical(GUI.skin.box);
+                EditorGUI.BeginDisabledGroup(!_src.useSafeMode && _src.logBehaviour != LogBehaviour.ErrorsOnly);
+                _src.debugStoreTargetId = EditorGUILayout.Toggle("Store GameObject's ID", _src.debugStoreTargetId);
+                GUILayout.Label(
+                    "<b>Requires Safe Mode to be active + Default or Verbose LogBehaviour:</b>" +
+                    " when using DO shortcuts stores the relative gameObject's name so it can be returned along the warning logs" +
+                    " (helps with a clearer identification of the warning's target)",
+                    EditorGUIUtils.wordWrapRichTextLabelStyle
+                );
+                EditorGUI.EndDisabledGroup();
+                GUILayout.EndVertical();
+            }
+        }
+
+        void DrawUtilsGUI()
+        {
+            GUILayout.Space(40);
+
+            // Fix missingScript references in scenes and prefabs
+            if (EditorUtils.hasPro) {
+                using (new GUILayout.VerticalScope(GUI.skin.box)) {
+                    GUILayout.Label("Fix <b>DOTweenPro</b> MissingScript References", EditorGUIUtils.wordWrapRichTextLabelStyle);
+                    if (GUILayout.Button("In <b>current</b> Scene", EditorGUIUtils.btSetup)) {
+                        if (EditorUtility.DisplayDialog("Fix MissingScript References",
+                            "Inspect current scene for missing DOTweenPro script References and fix them?\n\n(MAKE A BACKUP first!)", "Ok", "Cancel")
+                        ) Dispatch_OnRequestDOTweenProMissingScriptsFix(true);
+                    }
+                    if (GUILayout.Button("In <b>all</b> Scenes and Prefabs", EditorGUIUtils.btSetup)) {
+                        if (EditorUtility.DisplayDialog("Fix MissingScript References",
+                            "Inspect all your project's Prefabs and Scenes to find missing DOTweenPro script References and fix them?\n\n(MAKE A BACKUP first!)", "Ok", "Cancel")
+                        ) Dispatch_OnRequestDOTweenProMissingScriptsFix(false);
+                    }
+                    GUILayout.Space(4);
+                }
+            }
+            if (EditorUtils.hasDOTweenTimeline) {
+                using (new GUILayout.VerticalScope(GUI.skin.box)) {
+                    GUILayout.Label("Fix <b>DOTweenTimeline</b> MissingScript References", EditorGUIUtils.wordWrapRichTextLabelStyle);
+                    if (GUILayout.Button("In <b>current</b> Scene", EditorGUIUtils.btSetup)) {
+                        if (EditorUtility.DisplayDialog("Fix MissingScript References",
+                            "Inspect current scene for missing DOTweenTimeline script References and fix them?\n\n(MAKE A BACKUP first!)", "Ok", "Cancel")
+                        ) Dispatch_OnRequestDOTweenTimelineMissingScriptsFix(true);
+                    }
+                    if (GUILayout.Button("In <b>all</b> Scenes and Prefabs", EditorGUIUtils.btSetup)) {
+                        if (EditorUtility.DisplayDialog("Fix MissingScript References",
+                            "Inspect all your project's Prefabs and Scenes to find missing DOTweenTimeline script References and fix them?\n\n(MAKE A BACKUP first!)", "Ok", "Cancel")
+                        ) Dispatch_OnRequestDOTweenTimelineMissingScriptsFix(false);
+                    }
+                    GUILayout.Space(4);
+                }
+            }
         }
 
         // ===================================================================================
@@ -381,7 +556,7 @@ namespace DG.DOTweenEditor.UI
             public LocationData(string srcDir) : this()
             {
                 dir = srcDir;
-                filePath = dir + EditorUtils.pathSlash + DOTweenSettings.AssetName + ".asset";
+                filePath = dir + EditorUtils.pathSlash + DOTweenSettings.AssetFullFilename;
                 adbFilePath = EditorUtils.FullPathToADBPath(filePath);
                 adbParentDir = EditorUtils.FullPathToADBPath(dir.Substring(0, dir.LastIndexOf(EditorUtils.pathSlash)));
             }

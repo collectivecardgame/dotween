@@ -23,6 +23,16 @@ namespace DG.Tweening.Plugins
             t.startValue = isRelative ? t.endValue + prevEndVal : prevEndVal;
             t.setter(t.startValue);
         }
+        public override void SetFrom(TweenerCore<ulong, ulong, NoOptions> t, ulong fromValue, bool setImmediately, bool isRelative)
+        {
+            if (isRelative) {
+                ulong currVal = t.getter();
+                t.endValue += currVal;
+                fromValue += currVal;
+            }
+            t.startValue = fromValue;
+            if (setImmediately) t.setter(fromValue);
+        }
 
         public override ulong ConvertToStartValue(TweenerCore<ulong, ulong, NoOptions> t, ulong value)
         {
@@ -46,8 +56,11 @@ namespace DG.Tweening.Plugins
             return res;
         }
 
-        public override void EvaluateAndApply(NoOptions options, Tween t, bool isRelative, DOGetter<ulong> getter, DOSetter<ulong> setter, float elapsed, ulong startValue, ulong changeValue, float duration, bool usingInversePosition, UpdateNotice updateNotice)
-        {
+        public override void EvaluateAndApply(
+            NoOptions options, Tween t, bool isRelative, DOGetter<ulong> getter, DOSetter<ulong> setter,
+            float elapsed, ulong startValue, ulong changeValue, float duration, bool usingInversePosition, int newCompletedSteps,
+            UpdateNotice updateNotice
+        ){
             if (t.loopType == LoopType.Incremental) startValue += changeValue * (uint)(t.isComplete ? t.completedLoops - 1 : t.completedLoops);
             if (t.isSequenced && t.sequenceParent.loopType == LoopType.Incremental) {
                 startValue += changeValue * (uint)(t.loopType == LoopType.Incremental ? t.loops : 1)

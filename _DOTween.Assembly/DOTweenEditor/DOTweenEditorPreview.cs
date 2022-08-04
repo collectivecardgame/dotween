@@ -14,15 +14,11 @@ namespace DG.DOTweenEditor
 {
     public static class DOTweenEditorPreview
     {
-        static bool _isPreviewing;
+        public static bool isPreviewing { get; private set; }
+
         static double _previewTime;
         static Action _onPreviewUpdated;
-        static GameObject _previewObj; // Used so it can be set dirty (otherwise canvas-only tweens won't refresh the view)
-
-        static DOTweenEditorPreview()
-        {
-            Clear();
-        }
+        static readonly List<Tween> _Tweens = new List<Tween>();
 
         #region Public Methods
 
@@ -32,24 +28,38 @@ namespace DG.DOTweenEditor
         /// <param name="onPreviewUpdated">Eventual callback to call after every update</param>
         public static void Start(Action onPreviewUpdated = null)
         {
-            if (_isPreviewing || EditorApplication.isPlayingOrWillChangePlaymode) return;
+            if (isPreviewing || EditorApplication.isPlayingOrWillChangePlaymode) return;
 
-            _isPreviewing = true;
+            isPreviewing = true;
             _onPreviewUpdated = onPreviewUpdated;
             _previewTime = EditorApplication.timeSinceStartup;
             EditorApplication.update += PreviewUpdate;
-            _previewObj = new GameObject("-[ DOTween Preview ► ]-", typeof(PreviewComponent));
         }
 
         /// <summary>
-        /// Stops the update loop and clears any callback.
+        /// Stops the update loop and clears the onPreviewUpdated callback.
         /// </summary>
-        public static void Stop()
+        /// <param name="resetTweenTargets">If TRUE also resets the tweened objects to their original state.
+        /// Note that this works by calling Rewind on all tweens, so it will work correctly
+        /// only if you have a single tween type per object and it wasn't killed</param>
+        /// <param name="clearTweens">If TRUE also kills any cached tween</param>
+        public static void Stop(bool resetTweenTargets = false, bool clearTweens = true)
         {
-            _isPreviewing = false;
+            isPreviewing = false;
             EditorApplication.update -= PreviewUpdate;
             _onPreviewUpdated = null;
-            Clear();
+            if (resetTweenTargets) {
+                foreach (Tween t in _Tweens) {
+                    try {
+                        if (t.isFrom) t.Complete();
+                        else t.Rewind();
+                    } catch {
+                        // Ignore
+                    }
+                }
+            }
+            if (clearTweens) _Tweens.Clear();
+            else ValidateTweens();
         }
 
         /// <summary>
@@ -61,6 +71,7 @@ namespace DG.DOTweenEditor
         /// <param name="andPlay">If TRUE starts playing the tween immediately</param>
         public static void PrepareTweenForPreview(Tween t, bool clearCallbacks = true, bool preventAutoKill = true, bool andPlay = true)
         {
+            _Tweens.Add(t);
             t.SetUpdate(UpdateType.Manual);
             if (preventAutoKill) t.SetAutoKill(false);
             if (clearCallbacks) {
@@ -75,14 +86,6 @@ namespace DG.DOTweenEditor
 
         #region Methods
 
-        static void Clear()
-        {
-            _previewObj = null;
-            // Find and destroy any existing preview objects
-            PreviewComponent[] objs = Object.FindObjectsOfType<PreviewComponent>();
-            for (int i = 0; i < objs.Length; ++i) Object.DestroyImmediate(objs[i].gameObject);
-        }
-
         static void PreviewUpdate()
         {
             double currTime = _previewTime;
@@ -90,17 +93,16 @@ namespace DG.DOTweenEditor
             float elapsed = (float)(_previewTime - currTime);
             DOTween.ManualUpdate(elapsed, elapsed);
             
-            if (_previewObj != null) EditorUtility.SetDirty(_previewObj);
-
             if (_onPreviewUpdated != null) _onPreviewUpdated();
         }
 
+        static void ValidateTweens()
+        {
+            for (int i = _Tweens.Count - 1; i > -1; --i) {
+                if (_Tweens[i] == null || !_Tweens[i].active) _Tweens.RemoveAt(i);
+            }
+        }
+
         #endregion
-
-        // █████████████████████████████████████████████████████████████████████████████████████████████████████████████████████
-        // ███ INTERNAL CLASSES ████████████████████████████████████████████████████████████████████████████████████████████████
-        // █████████████████████████████████████████████████████████████████████████████████████████████████████████████████████
-
-        class PreviewComponent : MonoBehaviour {}
     }
 }

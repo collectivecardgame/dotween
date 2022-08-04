@@ -25,6 +25,17 @@ public class CustomRangePlugin : ABSTweenPlugin<CustomRange, CustomRange, NoOpti
         t.setter(t.startValue);
     }
 
+    public override void SetFrom(TweenerCore<CustomRange, CustomRange, NoOptions> t, CustomRange fromValue, bool setImmediately, bool isRelative)
+    {
+        if (isRelative) {
+            CustomRange currVal = t.getter();
+            t.endValue += currVal;
+            fromValue += currVal;
+        }
+        t.startValue = fromValue;
+        if (setImmediately) t.setter(fromValue);
+    }
+
     // Used by special plugins, just let it return the given value
     public override CustomRange ConvertToStartValue(TweenerCore<CustomRange, CustomRange, NoOptions> t, CustomRange value)
     {
@@ -51,8 +62,11 @@ public class CustomRangePlugin : ABSTweenPlugin<CustomRange, CustomRange, NoOpti
     }
 
     // Calculates the value based on the given time and ease
-    public override void EvaluateAndApply(NoOptions options, Tween t, bool isRelative, DOGetter<CustomRange> getter, DOSetter<CustomRange> setter, float elapsed, CustomRange startValue, CustomRange changeValue, float duration, bool usingInversePosition, UpdateNotice updateNotice)
-    {
+    public override void EvaluateAndApply(
+        NoOptions options, Tween t, bool isRelative, DOGetter<CustomRange> getter, DOSetter<CustomRange> setter,
+        float elapsed, CustomRange startValue, CustomRange changeValue, float duration, bool usingInversePosition, int newCompletedSteps,
+        UpdateNotice updateNotice
+    ){
         float easeVal = EaseManager.Evaluate(t, elapsed, duration, t.easeOvershootOrAmplitude, t.easePeriod);
 
         // Here I use startValue directly because CustomRange a struct, so it won't reference the original.

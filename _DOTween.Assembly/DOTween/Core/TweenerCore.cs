@@ -32,6 +32,8 @@ namespace DG.Tweening.Core
         internal ABSTweenPlugin<T1, T2, TPlugOptions> tweenPlugin;
 
         const string _TxtCantChangeSequencedValues = "You cannot change the values of a tween contained inside a Sequence";
+        Type _colorType = typeof(Color);
+        Type _color32Type = typeof(Color32);
 
         #region Constructor
 
@@ -52,17 +54,18 @@ namespace DG.Tweening.Core
         public override Tweener ChangeStartValue(object newStartValue, float newDuration = -1)
         {
             if (isSequenced) {
-                if (Debugger.logPriority >= 1) Debugger.LogWarning(_TxtCantChangeSequencedValues);
+                Debugger.LogError(_TxtCantChangeSequencedValues, this);
                 return this;
             }
 #if COMPATIBLE
             ConvertToWrapper(ref newStartValue);
 #endif
             Type valT = newStartValue.GetType();
-            if (valT != typeofT2) {
-                if (Debugger.logPriority >= 1) Debugger.LogWarning("ChangeStartValue: incorrect newStartValue type (is " + valT + ", should be " + typeofT2 + ")");
+            if (!ValidateChangeValueType(valT, out bool isColor32ToColor)) {
+                Debugger.LogError("ChangeStartValue: incorrect newStartValue type (is " + valT + ", should be " + typeofT2 + ")", this);
                 return this;
             }
+            if (isColor32ToColor) return DoChangeStartValue(this, (T2)(object)(Color)(Color32)newStartValue, newDuration);
             return DoChangeStartValue(this, (T2)newStartValue, newDuration);
         }
 
@@ -73,17 +76,18 @@ namespace DG.Tweening.Core
         public override Tweener ChangeEndValue(object newEndValue, float newDuration = -1, bool snapStartValue = false)
         {
             if (isSequenced) {
-                if (Debugger.logPriority >= 1) Debugger.LogWarning(_TxtCantChangeSequencedValues);
+                Debugger.LogError(_TxtCantChangeSequencedValues, this);
                 return this;
             }
 #if COMPATIBLE
             ConvertToWrapper(ref newEndValue);
 #endif
             Type valT = newEndValue.GetType();
-            if (valT != typeofT2) {
-                if (Debugger.logPriority >= 1) Debugger.LogWarning("ChangeEndValue: incorrect newEndValue type (is " + valT + ", should be " + typeofT2 + ")");
+            if (!ValidateChangeValueType(valT, out bool isColor32ToColor)) {
+                Debugger.LogError("ChangeEndValue: incorrect newEndValue type (is " + valT + ", should be " + typeofT2 + ")", this);
                 return this;
             }
+            if (isColor32ToColor) return DoChangeEndValue(this, (T2)(object)(Color)(Color32)newEndValue, newDuration, snapStartValue);
             return DoChangeEndValue(this, (T2)newEndValue, newDuration, snapStartValue);
         }
 
@@ -91,7 +95,7 @@ namespace DG.Tweening.Core
         public override Tweener ChangeValues(object newStartValue, object newEndValue, float newDuration = -1)
         {
             if (isSequenced) {
-                if (Debugger.logPriority >= 1) Debugger.LogWarning(_TxtCantChangeSequencedValues);
+                Debugger.LogError(_TxtCantChangeSequencedValues, this);
                 return this;
             }
 #if COMPATIBLE
@@ -100,16 +104,68 @@ namespace DG.Tweening.Core
 #endif
             Type valT0 = newStartValue.GetType();
             Type valT1 = newEndValue.GetType();
-            if (valT0 != typeofT2) {
-                if (Debugger.logPriority >= 1) Debugger.LogWarning("ChangeValues: incorrect value type (is " + valT0 + ", should be " + typeofT2 + ")");
+            if (!ValidateChangeValueType(valT0, out bool isColor32ToColor)) {
+                Debugger.LogError("ChangeValues: incorrect value type (is " + valT0 + ", should be " + typeofT2 + ")", this);
                 return this;
             }
-            if (valT1 != typeofT2) {
-                if (Debugger.logPriority >= 1) Debugger.LogWarning("ChangeValues: incorrect value type (is " + valT1 + ", should be " + typeofT2 + ")");
+            if (!ValidateChangeValueType(valT1, out isColor32ToColor)) {
+                Debugger.LogError("ChangeValues: incorrect value type (is " + valT1 + ", should be " + typeofT2 + ")", this);
                 return this;
             }
+            if (isColor32ToColor) return DoChangeValues(this, (T2)(object)(Color)(Color32)newStartValue, (T2)(object)(Color)(Color32)newEndValue, newDuration);
             return DoChangeValues(this, (T2)newStartValue, (T2)newEndValue, newDuration);
         }
+
+        #region Advanced Usage (direct from TweenerCore reference)
+
+        /// <summary>NO-GC METHOD: changes the start value of a tween and rewinds it (without pausing it).
+        /// Has no effect with tweens that are inside Sequences</summary>
+        /// <param name="newStartValue">The new start value</param>
+        /// <param name="newDuration">If bigger than 0 applies it as the new tween duration</param>
+        public TweenerCore<T1,T2,TPlugOptions> ChangeStartValue(T2 newStartValue, float newDuration = -1)
+        {
+            if (isSequenced) {
+                Debugger.LogError(_TxtCantChangeSequencedValues, this);
+                return this;
+            }
+            return DoChangeStartValue(this, newStartValue, newDuration);
+        }
+
+        /// <summary>NO-GC METHOD: changes the end value of a tween and rewinds it (without pausing it).
+        /// Has no effect with tweens that are inside Sequences</summary>
+        /// <param name="newEndValue">The new end value</param>
+        /// <param name="snapStartValue">If TRUE the start value will become the current target's value, otherwise it will stay the same</param>
+        public TweenerCore<T1,T2,TPlugOptions> ChangeEndValue(T2 newEndValue, bool snapStartValue)
+        { return ChangeEndValue(newEndValue, -1, snapStartValue); }
+        /// <summary>NO-GC METHOD: changes the end value of a tween and rewinds it (without pausing it).
+        /// Has no effect with tweens that are inside Sequences</summary>
+        /// <param name="newEndValue">The new end value</param>
+        /// <param name="newDuration">If bigger than 0 applies it as the new tween duration</param>
+        /// <param name="snapStartValue">If TRUE the start value will become the current target's value, otherwise it will stay the same</param>
+        public TweenerCore<T1,T2,TPlugOptions> ChangeEndValue(T2 newEndValue, float newDuration = -1, bool snapStartValue = false)
+        {
+            if (isSequenced) {
+                Debugger.LogError(_TxtCantChangeSequencedValues, this);
+                return this;
+            }
+            return DoChangeEndValue(this, newEndValue, newDuration, snapStartValue);
+        }
+
+        /// <summary>NO-GC METHOD: changes the start and end value of a tween and rewinds it (without pausing it).
+        /// Has no effect with tweens that are inside Sequences</summary>
+        /// <param name="newStartValue">The new start value</param>
+        /// <param name="newEndValue">The new end value</param>
+        /// <param name="newDuration">If bigger than 0 applies it as the new tween duration</param>
+        public TweenerCore<T1,T2,TPlugOptions> ChangeValues(T2 newStartValue, T2 newEndValue, float newDuration = -1)
+        {
+            if (isSequenced) {
+                Debugger.LogError(_TxtCantChangeSequencedValues, this);
+                return this;
+            }
+            return DoChangeValues(this, newStartValue, newEndValue, newDuration);
+        }
+
+        #endregion
 
         #endregion
 
@@ -124,6 +180,17 @@ namespace DG.Tweening.Core
             hasManuallySetStartValue = true;
             return this;
         }
+        // Sets From tweens in an alternate way where you can set the start value directly
+        // (instead of setting it from the endValue).
+        // Plugins that don't support From:
+        // - Vector3ArrayPlugin
+        // - Pro > PathPlugin, SpiralPlugin
+        internal Tweener SetFrom(T2 fromValue, bool setImmediately, bool relative)
+        {
+            tweenPlugin.SetFrom(this, fromValue, setImmediately, relative);
+            hasManuallySetStartValue = true;
+            return this;
+        }
 
         // _tweenPlugin is not reset since it's useful to keep it as a reference
         internal sealed override void Reset()
@@ -132,7 +199,7 @@ namespace DG.Tweening.Core
 
             if (tweenPlugin != null) tweenPlugin.Reset(this);
 //            plugOptions = new TPlugOptions(); // Generates GC because converts to an Activator.CreateInstance
-//            plugOptions = Utils.InstanceCreator<TPlugOptions>.Create(); // Fixes GC allocation using workaround (doesn't work with IL2CPP)
+//            plugOptions = DOTweenUtils.InstanceCreator<TPlugOptions>.Create(); // Fixes GC allocation using workaround (doesn't work with IL2CPP)
             plugOptions.Reset(); // Alternate fix that uses IPlugOptions Reset
             getter = null;
             setter = null;
@@ -150,6 +217,21 @@ namespace DG.Tweening.Core
                 return false;
             }
             return true;
+        }
+
+        // Validates if a ChangeEnd/StartValue passed type is compatible with the current one
+        bool ValidateChangeValueType(Type newType, out bool isColor32ToColor)
+        {
+            if (newType == typeofT2) {
+                isColor32ToColor = false;
+                return true;
+            }
+            if (typeofT2 == _colorType && newType == _color32Type) {
+                isColor32ToColor = true;
+                return true;
+            }
+            isColor32ToColor = false;
+            return false;
         }
 
         // CALLED BY TweenManager at each update.
@@ -172,16 +254,23 @@ namespace DG.Tweening.Core
         // Returns TRUE if the tween needs to be killed
         internal override bool ApplyTween(float prevPosition, int prevCompletedLoops, int newCompletedSteps, bool useInversePosition, UpdateMode updateMode, UpdateNotice updateNotice)
         {
+            if (isInverted) useInversePosition = !useInversePosition;
             float updatePosition = useInversePosition ? duration - position : position;
             if (DOTween.useSafeMode) {
                 try {
-                    tweenPlugin.EvaluateAndApply(plugOptions, this, isRelative, getter, setter, updatePosition, startValue, changeValue, duration, useInversePosition, updateNotice);
-                } catch {
+                    tweenPlugin.EvaluateAndApply(plugOptions, this, isRelative, getter, setter, updatePosition, startValue, changeValue, duration, useInversePosition, newCompletedSteps, updateNotice);
+                } catch (Exception e) {
                     // Target/field doesn't exist anymore: kill tween
+                    if (Debugger.ShouldLogSafeModeCapturedError()) {
+                        Debugger.LogSafeModeCapturedError(string.Format(
+                            "Target or field is missing/null ({0}) ► {1}\n\n{2}\n\n", e.TargetSite, e.Message, e.StackTrace
+                        ), this);
+                    }
+                    DOTween.safeModeReport.Add(SafeModeReport.SafeModeReportType.TargetOrFieldMissing);
                     return true;
                 }
             } else {
-                tweenPlugin.EvaluateAndApply(plugOptions, this, isRelative, getter, setter, updatePosition, startValue, changeValue, duration, useInversePosition, updateNotice);
+                tweenPlugin.EvaluateAndApply(plugOptions, this, isRelative, getter, setter, updatePosition, startValue, changeValue, duration, useInversePosition, newCompletedSteps, updateNotice);
             }
             return false;
         }

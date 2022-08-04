@@ -47,6 +47,41 @@ namespace DG.Tweening.Plugins
             }
             t.setter(to);
         }
+        public override void SetFrom(TweenerCore<Vector3, Vector3, VectorOptions> t, Vector3 fromValue, bool setImmediately, bool isRelative)
+        {
+            if (isRelative) {
+                Vector3 currVal = t.getter();
+                t.endValue += currVal;
+                fromValue += currVal;
+            }
+            t.startValue = fromValue;
+            if (setImmediately) {
+                Vector3 to;
+                switch (t.plugOptions.axisConstraint) {
+                case AxisConstraint.X:
+                    to = t.getter();
+                    to.x = fromValue.x;
+                    break;
+                case AxisConstraint.Y:
+                    to = t.getter();
+                    to.y = fromValue.y;
+                    break;
+                case AxisConstraint.Z:
+                    to = t.getter();
+                    to.z = fromValue.z;
+                    break;
+                default:
+                    to = fromValue;
+                    break;
+                }
+                if (t.plugOptions.snapping) {
+                    to.x = (float)Math.Round(to.x);
+                    to.y = (float)Math.Round(to.y);
+                    to.z = (float)Math.Round(to.z);
+                }
+                t.setter(to);
+            }
+        }
 
         public override Vector3 ConvertToStartValue(TweenerCore<Vector3, Vector3, VectorOptions> t, Vector3 value)
         {
@@ -81,8 +116,11 @@ namespace DG.Tweening.Plugins
             return changeValue.magnitude / unitsXSecond;
         }
 
-        public override void EvaluateAndApply(VectorOptions options, Tween t, bool isRelative, DOGetter<Vector3> getter, DOSetter<Vector3> setter, float elapsed, Vector3 startValue, Vector3 changeValue, float duration, bool usingInversePosition, UpdateNotice updateNotice)
-        {
+        public override void EvaluateAndApply(
+            VectorOptions options, Tween t, bool isRelative, DOGetter<Vector3> getter, DOSetter<Vector3> setter,
+            float elapsed, Vector3 startValue, Vector3 changeValue, float duration, bool usingInversePosition, int newCompletedSteps,
+            UpdateNotice updateNotice
+        ){
             if (t.loopType == LoopType.Incremental) startValue += changeValue * (t.isComplete ? t.completedLoops - 1 : t.completedLoops);
             if (t.isSequenced && t.sequenceParent.loopType == LoopType.Incremental) {
                 startValue += changeValue * (t.loopType == LoopType.Incremental ? t.loops : 1)

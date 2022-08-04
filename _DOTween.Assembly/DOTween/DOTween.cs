@@ -4,6 +4,8 @@
 // License Copyright (c) Daniele Giardini.
 // This work is subject to the terms at http://dotween.demigiant.com/license.php
 
+
+using System;
 #if COMPATIBLE
 using DOVector2 = DG.Tweening.Core.Surrogates.Vector2Wrapper;
 using DOVector3 = DG.Tweening.Core.Surrogates.Vector3Wrapper;
@@ -20,6 +22,7 @@ using DOColor = UnityEngine.Color;
 using System.Collections.Generic;
 using DG.Tweening.Core;
 using DG.Tweening.Core.Enums;
+using DG.Tweening.Plugins;
 using DG.Tweening.Plugins.Core;
 using DG.Tweening.Plugins.Options;
 using UnityEngine;
@@ -32,7 +35,7 @@ namespace DG.Tweening
     public class DOTween
     {
         /// <summary>DOTween's version</summary>
-        public static readonly string Version = "1.2.130"; // Last version before modules: 1.1.755
+        public static readonly string Version = "1.2.690"; // Last version before modules: 1.1.755
 
         ///////////////////////////////////////////////
         // Options ////////////////////////////////////
@@ -41,14 +44,26 @@ namespace DG.Tweening
         /// (like targets becoming null while a tween is playing).
         /// <para>Default: TRUE</para></summary>
         public static bool useSafeMode = true;
+        /// <summary>Log type when safe mode reports capturing an error and preventing it</summary>
+        public static SafeModeLogBehaviour safeModeLogBehaviour = SafeModeLogBehaviour.Warning;
+        /// <summary>Behaviour in case a tween nested inside a Sequence fails (and is caught by safe mode).
+        /// <para>Default: NestedTweenFailureBehaviour.TryToPreserveSequence</para></summary>
+        public static NestedTweenFailureBehaviour nestedTweenFailureBehaviour = NestedTweenFailureBehaviour.TryToPreserveSequence;
         /// <summary>If TRUE you will get a DOTween report when exiting play mode (only in the Editor).
         /// Useful to know how many max Tweeners and Sequences you reached and optimize your final project accordingly.
         /// Beware, this will slightly slow down your tweens while inside Unity Editor.
         /// <para>Default: FALSE</para></summary>
         public static bool showUnityEditorReport = false;
-        /// <summary>Global DOTween timeScale.
-        /// <para>Default: 1</para></summary>
+        /// <summary>Global DOTween global timeScale (default: 1).<para/>
+        /// The final timeScale of a non-timeScaleIndependent tween is:<para/>
+        /// <code>Unity's Time.timeScale * DOTween.timeScale * tween.timeScale</code><para/>
+        /// while the final timeScale of a timeScaleIndependent tween is:<para/>
+        /// <code>DOTween.unscaledTimeScale * DOTween.timeScale * tween.timeScale</code></summary>
         public static float timeScale = 1;
+        /// <summary>DOTween timeScale applied only to timeScaleIndependent tweens (default: 1).<para/>
+        /// The final timeScale of a timeScaleIndependent tween is:<para/>
+        /// <code>DOTween.unscaledTimeScale * DOTween.timeScale * tween.timeScale</code></summary>
+        public static float unscaledTimeScale = 1;
         /// <summary>If TRUE, DOTween will use Time.smoothDeltaTime instead of Time.deltaTime for UpdateType.Normal and UpdateType.Late tweens
         /// (unless they're set as timeScaleIndependent, in which case a value between the last timestep
         /// and <see cref="maxSmoothUnscaledTime"/> will be used instead).
@@ -68,9 +83,25 @@ namespace DG.Tweening
             set { _logBehaviour = value; Debugger.SetLogPriority(_logBehaviour); }
         }
         static LogBehaviour _logBehaviour = LogBehaviour.ErrorsOnly;
+        /// <summary>Used to intercept DOTween's logs. If this method isn't NULL, DOTween will call it before writing a log via Unity's own Debug log methods.<para/>
+        /// Return TRUE if you want DOTween to proceed with the log, FALSE otherwise.<para/>
+        /// This method must return a <code>bool</code> and accept two parameters:<para/>
+        /// - <code>LogType</code>: the type of Unity log that DOTween is trying to log<para/>
+        /// - <code>object</code>: the log message that DOTween wants to log</summary>
+        public static Func<LogType, object, bool> onWillLog;
         /// <summary>If TRUE draws path gizmos in Unity Editor (if the gizmos button is active).
         /// Deactivate this if you want to avoid gizmos overhead while in Unity Editor</summary>
         public static bool drawGizmos = true;
+        // DEBUG OPTIONS
+        /// <summary>If TRUE activates various debug options</summary>
+        public static bool debugMode = false;
+        /// <summary>Stores the target id so it can be used to give more info in case of safeMode error capturing.
+        /// Only active if both <code>debugMode</code> and <code>useSafeMode</code> are TRUE</summary>
+        public static bool debugStoreTargetId {
+            get { return debugMode && useSafeMode && _fooDebugStoreTargetId; }
+            set { _fooDebugStoreTargetId = value; }
+        }
+        static bool _fooDebugStoreTargetId = true;
 
         ///////////////////////////////////////////////
         // Default options for Tweens /////////////////
@@ -106,10 +137,26 @@ namespace DG.Tweening
         /// <summary>Used internally. Assigned/removed by DOTweenComponent.Create/DestroyInstance</summary>
         public static DOTweenComponent instance;
 
+        // Set by DOTweenComponent when the application is quitting.
+        // Resets isQuitting if the frame count when it was set to TRUE changed (in order to work with no-domain-reload quick enter playmode)
+        internal static bool isQuitting {
+            get {
+                if (!_foo_isQuitting) return false;
+                // if (Time.frameCount > 0 && _isQuittingFrame != Time.frameCount) { // Doesn't work with domain reload if checking with a > 0 frameCount
+                if (Time.frameCount >= 0 && _isQuittingFrame != Time.frameCount) {
+                    _foo_isQuitting = false;
+                    return false;
+                }
+                return true;
+            }
+            set { _foo_isQuitting = value; if (value)_isQuittingFrame = Time.frameCount; }
+        }
+        static bool _foo_isQuitting;
         internal static int maxActiveTweenersReached, maxActiveSequencesReached; // Controlled by DOTweenInspector if showUnityEditorReport is active
+        internal static SafeModeReport safeModeReport; // Used to store how many safe mode errors are captured in the editor
         internal static readonly List<TweenCallback> GizmosDelegates = new List<TweenCallback>(); // Can be used by other classes to call internal gizmo draw methods
         internal static bool initialized; // Can be set to false by DOTweenComponent OnDestroy
-        internal static bool isQuitting; // Set by DOTweenComponent when the application is quitting
+        static int _isQuittingFrame = -1; // Frame when isQuitting was set. Sets isQuitting to false after this frame (so no-domain-reload playmode can work)
 
         #region Public Methods
 
@@ -149,6 +196,7 @@ namespace DG.Tweening
         // Auto-init
         static void AutoInit()
         {
+            if (!Application.isPlaying || isQuitting) return;
             DOTweenSettings settings = Resources.Load(DOTweenSettings.AssetName) as DOTweenSettings;
             Init(settings, null, null, null);
         }
@@ -167,7 +215,10 @@ namespace DG.Tweening
                 if (useSafeMode == null) DOTween.useSafeMode = settings.useSafeMode;
                 if (logBehaviour == null) DOTween.logBehaviour = settings.logBehaviour;
                 if (recycleAllByDefault == null) DOTween.defaultRecyclable = settings.defaultRecyclable;
+                DOTween.safeModeLogBehaviour = settings.safeModeOptions.logBehaviour;
+                DOTween.nestedTweenFailureBehaviour = settings.safeModeOptions.nestedTweenFailureBehaviour;
                 DOTween.timeScale = settings.timeScale;
+                DOTween.unscaledTimeScale = settings.unscaledTimeScale;
                 DOTween.useSmoothDeltaTime = settings.useSmoothDeltaTime;
                 DOTween.maxSmoothUnscaledTime = settings.maxSmoothUnscaledTime;
                 DOTween.rewindCallbackMode = settings.rewindCallbackMode;
@@ -182,6 +233,9 @@ namespace DG.Tweening
                 DOTween.defaultEasePeriod = settings.defaultEasePeriod;
                 DOTween.defaultAutoKill = settings.defaultAutoKill;
                 DOTween.defaultLoopType = settings.defaultLoopType;
+                // Debug options
+                DOTween.debugMode = settings.debugMode;
+                DOTween.debugStoreTargetId = settings.debugStoreTargetId;
             }
             // Log
             if (Debugger.logPriority >= 2) Debugger.Log("DOTween initialization (useSafeMode: " + DOTween.useSafeMode + ", recycling: " + (DOTween.defaultRecyclable ? "ON" : "OFF") + ", logBehaviour: " + DOTween.logBehaviour + ")");
@@ -214,17 +268,28 @@ namespace DG.Tweening
         /// (so that next time you use it it will need to be re-initialized)</param>
         public static void Clear(bool destroy = false)
         {
-            TweenManager.PurgeAll();
+            Clear(destroy, false);
+        }
+
+        internal static void Clear(bool destroy, bool isApplicationQuitting)
+        {
+            TweenManager.PurgeAll(isApplicationQuitting);
             PluginsManager.PurgeAll();
             if (!destroy) return;
 
             initialized = false;
             useSafeMode = false;
+            safeModeLogBehaviour = SafeModeLogBehaviour.Warning;
+            nestedTweenFailureBehaviour = NestedTweenFailureBehaviour.TryToPreserveSequence;
             showUnityEditorReport = false;
             drawGizmos = true;
             timeScale = 1;
+            unscaledTimeScale = 1;
             useSmoothDeltaTime = false;
+            maxSmoothUnscaledTime = 0.15f;
+            rewindCallbackMode = RewindCallbackMode.FireIfPositionChanged;
             logBehaviour = LogBehaviour.ErrorsOnly;
+            onWillLog = null;
             defaultEaseType = Ease.OutQuad;
             defaultEaseOvershootOrAmplitude = 1.70158f;
             defaultEasePeriod = 0;
@@ -235,6 +300,7 @@ namespace DG.Tweening
             defaultAutoKill = true;
             defaultRecyclable = false;
             maxActiveTweenersReached = maxActiveSequencesReached = 0;
+            GizmosDelegates.Clear();
 
             DOTweenComponent.DestroyInstance();
         }
@@ -268,7 +334,7 @@ namespace DG.Tweening
             InitCheck();
 //            instance.ManualUpdate(deltaTime, unscaledDeltaTime);
             if (TweenManager.hasActiveManualTweens) {
-                TweenManager.Update(UpdateType.Manual, deltaTime * DOTween.timeScale, unscaledDeltaTime * DOTween.timeScale);
+                TweenManager.Update(UpdateType.Manual, deltaTime * DOTween.timeScale, unscaledDeltaTime * DOTween.unscaledTimeScale * DOTween.timeScale);
             }
         }
 
@@ -307,7 +373,7 @@ namespace DG.Tweening
         /// <param name="setter">A setter for the field or property to tween
         /// <para>Example usage with lambda:</para><code>x=> myProperty = x</code></param>
         /// <param name="endValue">The end value to reach</param><param name="duration">The tween's duration</param>
-        public static Tweener To(DOGetter<int> getter, DOSetter<int> setter, int endValue,float duration)
+        public static TweenerCore<int, int, NoOptions> To(DOGetter<int> getter, DOSetter<int> setter, int endValue,float duration)
         { return ApplyTo<int, int, NoOptions>(getter, setter, endValue, duration); }
         /// <summary>Tweens a property or field to the given value using default plugins</summary>
         /// <param name="getter">A getter for the field or property to tween.
@@ -315,7 +381,7 @@ namespace DG.Tweening
         /// <param name="setter">A setter for the field or property to tween
         /// <para>Example usage with lambda:</para><code>x=> myProperty = x</code></param>
         /// <param name="endValue">The end value to reach</param><param name="duration">The tween's duration</param>
-        public static Tweener To(DOGetter<uint> getter, DOSetter<uint> setter, uint endValue, float duration)
+        public static TweenerCore<uint, uint, UintOptions> To(DOGetter<uint> getter, DOSetter<uint> setter, uint endValue, float duration)
         { return ApplyTo<uint, uint, UintOptions>(getter, setter, endValue, duration); }
         /// <summary>Tweens a property or field to the given value using default plugins</summary>
         /// <param name="getter">A getter for the field or property to tween.
@@ -323,7 +389,7 @@ namespace DG.Tweening
         /// <param name="setter">A setter for the field or property to tween
         /// <para>Example usage with lambda:</para><code>x=> myProperty = x</code></param>
         /// <param name="endValue">The end value to reach</param><param name="duration">The tween's duration</param>
-        public static Tweener To(DOGetter<long> getter, DOSetter<long> setter, long endValue, float duration)
+        public static TweenerCore<long, long, NoOptions> To(DOGetter<long> getter, DOSetter<long> setter, long endValue, float duration)
         { return ApplyTo<long, long, NoOptions>(getter, setter, endValue, duration); }
         /// <summary>Tweens a property or field to the given value using default plugins</summary>
         /// <param name="getter">A getter for the field or property to tween.
@@ -331,7 +397,7 @@ namespace DG.Tweening
         /// <param name="setter">A setter for the field or property to tween
         /// <para>Example usage with lambda:</para><code>x=> myProperty = x</code></param>
         /// <param name="endValue">The end value to reach</param><param name="duration">The tween's duration</param>
-        public static Tweener To(DOGetter<ulong> getter, DOSetter<ulong> setter, ulong endValue, float duration)
+        public static TweenerCore<ulong, ulong, NoOptions> To(DOGetter<ulong> getter, DOSetter<ulong> setter, ulong endValue, float duration)
         { return ApplyTo<ulong, ulong, NoOptions>(getter, setter, endValue, duration); }
         /// <summary>Tweens a property or field to the given value using default plugins</summary>
         /// <param name="getter">A getter for the field or property to tween.
@@ -426,14 +492,19 @@ namespace DG.Tweening
             t.plugOptions.axisConstraint = axisConstraint;
             return t;
         }
+
         /// <summary>Tweens only the alpha of a Color to the given value using default plugins</summary>
         /// <param name="getter">A getter for the field or property to tween.
         /// <para>Example usage with lambda:</para><code>()=> myProperty</code></param>
         /// <param name="setter">A setter for the field or property to tween
         /// <para>Example usage with lambda:</para><code>x=> myProperty = x</code></param>
         /// <param name="endValue">The end value to reach</param><param name="duration">The tween's duration</param>
-        public static Tweener ToAlpha(DOGetter<DOColor> getter, DOSetter<DOColor> setter, float endValue, float duration)
-        { return ApplyTo<DOColor, DOColor, ColorOptions>(getter, setter, new Color(0, 0, 0, endValue), duration).SetOptions(true); }
+        public static TweenerCore<Color, Color, ColorOptions> ToAlpha(DOGetter<DOColor> getter, DOSetter<DOColor> setter, float endValue, float duration)
+        {
+            TweenerCore<Color, Color, ColorOptions> t = ApplyTo<DOColor, DOColor, ColorOptions>(getter, setter, new Color(0, 0, 0, endValue), duration);
+            t.SetOptions(true);
+            return t;
+        }
 
         #endregion
 
@@ -515,11 +586,13 @@ namespace DG.Tweening
         /// Setting it to 0 will shake along a single direction and behave like a random punch.</param>
         /// <param name="ignoreZAxis">If TRUE only shakes on the X Y axis (looks better with things like cameras).</param>
         /// <param name="fadeOut">If TRUE the shake will automatically fadeOut smoothly within the tween's duration, otherwise it will not</param>
+        /// <param name="randomnessMode">Randomness mode</param>
         public static TweenerCore<Vector3, Vector3[], Vector3ArrayOptions> Shake(DOGetter<Vector3> getter, DOSetter<Vector3> setter, float duration,
-            float strength = 3, int vibrato = 10, float randomness = 90, bool ignoreZAxis = true, bool fadeOut = true
+            float strength = 3, int vibrato = 10, float randomness = 90, bool ignoreZAxis = true,
+            bool fadeOut = true, ShakeRandomnessMode randomnessMode = ShakeRandomnessMode.Full
         )
         {
-            return Shake(getter, setter, duration, new Vector3(strength, strength, strength), vibrato, randomness, ignoreZAxis, false, fadeOut);
+            return Shake(getter, setter, duration, new Vector3(strength, strength, strength), vibrato, randomness, ignoreZAxis, false, fadeOut, randomnessMode);
         }
         /// <summary>Shakes a Vector3 with the given values.</summary>
         /// <param name="getter">A getter for the field or property to tween.
@@ -532,14 +605,17 @@ namespace DG.Tweening
         /// <param name="randomness">Indicates how much the shake will be random (0 to 180 - values higher than 90 kind of suck, so beware). 
         /// Setting it to 0 will shake along a single direction and behave like a random punch.</param>
         /// <param name="fadeOut">If TRUE the shake will automatically fadeOut smoothly within the tween's duration, otherwise it will not</param>
+        /// <param name="randomnessMode">Randomness mode</param>
         public static TweenerCore<Vector3, Vector3[], Vector3ArrayOptions> Shake(DOGetter<Vector3> getter, DOSetter<Vector3> setter, float duration,
-            Vector3 strength, int vibrato = 10, float randomness = 90, bool fadeOut = true
+            Vector3 strength, int vibrato = 10, float randomness = 90,
+            bool fadeOut = true, ShakeRandomnessMode randomnessMode = ShakeRandomnessMode.Full
         )
         {
-            return Shake(getter, setter, duration, strength, vibrato, randomness, false, true, fadeOut);
+            return Shake(getter, setter, duration, strength, vibrato, randomness, false, true, fadeOut, randomnessMode);
         }
         static TweenerCore<Vector3, Vector3[], Vector3ArrayOptions> Shake(DOGetter<Vector3> getter, DOSetter<Vector3> setter, float duration,
-            Vector3 strength, int vibrato, float randomness, bool ignoreZAxis, bool vectorBased, bool fadeOut
+            Vector3 strength, int vibrato, float randomness, bool ignoreZAxis, bool vectorBased,
+            bool fadeOut, ShakeRandomnessMode randomnessMode
         )
         {
             float shakeMagnitude = vectorBased ? strength.magnitude : strength.x;
@@ -562,22 +638,35 @@ namespace DG.Tweening
             Vector3[] tos = new Vector3[totIterations];
             for (int i = 0; i < totIterations; ++i) {
                 if (i < totIterations - 1) {
-                    if (i > 0) ang = ang - 180 + UnityEngine.Random.Range(-randomness, randomness);
+                    Quaternion rndQuaternion = Quaternion.identity;
+                    switch (randomnessMode) {
+                    case ShakeRandomnessMode.Harmonic:
+                        if (i > 0) ang = ang - 180 + UnityEngine.Random.Range(0, randomness);
+                        if (vectorBased || !ignoreZAxis) {
+                            rndQuaternion = Quaternion.AngleAxis(UnityEngine.Random.Range(0, randomness), Vector3.up);
+                        }
+                        break;
+                    default: // Full
+                        if (i > 0) ang = ang - 180 + UnityEngine.Random.Range(-randomness, randomness);
+                        if (vectorBased || !ignoreZAxis) {
+                            rndQuaternion = Quaternion.AngleAxis(UnityEngine.Random.Range(-randomness, randomness), Vector3.up);
+                        }
+                        break;
+                    }
                     if (vectorBased) {
-                        Quaternion rndQuaternion = Quaternion.AngleAxis(UnityEngine.Random.Range(-randomness, randomness), Vector3.up);
-                        Vector3 to = rndQuaternion * Utils.Vector3FromAngle(ang, shakeMagnitude);
+                        Vector3 to = rndQuaternion * DOTweenUtils.Vector3FromAngle(ang, shakeMagnitude);
                         to.x = Vector3.ClampMagnitude(to, strength.x).x;
                         to.y = Vector3.ClampMagnitude(to, strength.y).y;
                         to.z = Vector3.ClampMagnitude(to, strength.z).z;
+                        to = to.normalized * shakeMagnitude; // Make sure first shake uses max magnitude
                         tos[i] = to;
                         if (fadeOut) shakeMagnitude -= decayXTween;
                         strength = Vector3.ClampMagnitude(strength, shakeMagnitude);
                     } else {
                         if (ignoreZAxis) {
-                            tos[i] = Utils.Vector3FromAngle(ang, shakeMagnitude);
+                            tos[i] = DOTweenUtils.Vector3FromAngle(ang, shakeMagnitude);
                         } else {
-                            Quaternion rndQuaternion = Quaternion.AngleAxis(UnityEngine.Random.Range(-randomness, randomness), Vector3.up);
-                            tos[i] = rndQuaternion * Utils.Vector3FromAngle(ang, shakeMagnitude);
+                            tos[i] = rndQuaternion * DOTweenUtils.Vector3FromAngle(ang, shakeMagnitude);
                         }
                         if (fadeOut) shakeMagnitude -= decayXTween;
                     }
@@ -633,7 +722,10 @@ namespace DG.Tweening
         #region Tween SEQUENCE
 
         /// <summary>
-        /// Returns a new <see cref="Sequence"/> to be used for tween groups
+        /// Returns a new <see cref="DG.Tweening.Sequence"/> to be used for tween groups.<para/>
+        /// Mind that Sequences don't have a target applied automatically like Tweener creation shortcuts,
+        /// so if you want to be able to kill this Sequence when calling DOTween.Kill(target) you'll have to add
+        /// the target manually; you can do that directly by using the <see cref="Sequence(object)"/> overload instead of this one
         /// </summary>
         public static Sequence Sequence()
         {
@@ -642,6 +734,16 @@ namespace DG.Tweening
             Tweening.Sequence.Setup(sequence);
             return sequence;
         }
+        /// <summary>
+        /// Returns a new <see cref="DG.Tweening.Sequence"/> to be used for tween groups, and allows to set a target
+        /// (because Sequences don't have their target set automatically like Tweener creation shortcuts).
+        /// That way killing/controlling tweens by target will apply to this Sequence too.
+        /// </summary>
+        /// <param name="target">The target of the Sequence. Relevant only for static target-based methods like DOTween.Kill(target),
+        /// useless otherwise</param>
+        public static Sequence Sequence(object target)
+        { return DOTween.Sequence().SetTarget(target); }
+
         #endregion
 
         /////////////////////////////////////////////////////////////////////
@@ -676,6 +778,11 @@ namespace DG.Tweening
         {
             if (targetOrId == null) return 0;
             return TweenManager.FilteredOperation(OperationType.Complete, FilterType.TargetOrId, targetOrId, true, 0);
+        }
+        internal static int CompleteAndReturnKilledTot(object target, object id)
+        {
+            if (target == null || id == null) return 0;
+            return TweenManager.FilteredOperation(OperationType.Complete, FilterType.TargetAndId, id, true, 0, target);
         }
         internal static int CompleteAndReturnKilledTotExceptFor(params object[] excludeTargetsOrIds)
         {
@@ -737,6 +844,14 @@ namespace DG.Tweening
             if (targetOrId == null) return 0;
             int tot = complete ? CompleteAndReturnKilledTot(targetOrId) : 0;
             return tot + TweenManager.FilteredOperation(OperationType.Despawn, FilterType.TargetOrId, targetOrId, false, 0);
+        }
+        /// <summary>Kills all tweens with the given target and the given ID, and returns the number of actual tweens killed</summary>
+        /// <param name="complete">If TRUE completes the tweens before killing them</param>
+        public static int Kill(object target, object id, bool complete = false)
+        {
+            if (target == null || id == null) return 0;
+            int tot = complete ? CompleteAndReturnKilledTot(target, id) : 0;
+            return tot + TweenManager.FilteredOperation(OperationType.Despawn, FilterType.TargetAndId, id, false, 0, target);
         }
 
         /// <summary>Pauses all tweens and returns the number of actual tweens paused</summary>
@@ -905,12 +1020,50 @@ namespace DG.Tweening
         }
 
         /// <summary>
+        /// Returns the total number of active tweens (so both Tweeners and Sequences).
+        /// A tween is considered active if it wasn't killed, regardless if it's playing or paused
+        /// </summary>
+        public static int TotalActiveTweens()
+        {
+            return TweenManager.totActiveTweens;
+        }
+
+        /// <summary>
+        /// Returns the total number of active Tweeners.
+        /// A Tweener is considered active if it wasn't killed, regardless if it's playing or paused
+        /// </summary>
+        public static int TotalActiveTweeners()
+        {
+            return TweenManager.totActiveTweeners;
+        }
+
+        /// <summary>
+        /// Returns the total number of active Sequences.
+        /// A Sequence is considered active if it wasn't killed, regardless if it's playing or paused
+        /// </summary>
+        public static int TotalActiveSequences()
+        {
+            return TweenManager.totActiveSequences;
+        }
+
+        /// <summary>
         /// Returns the total number of active and playing tweens.
         /// A tween is considered as playing even if its delay is actually playing
         /// </summary>
         public static int TotalPlayingTweens()
         {
             return TweenManager.TotalPlayingTweens();
+        }
+
+        /// <summary>
+        /// Returns a the total number of active tweens with the given id.
+        /// </summary>
+        /// <param name="playingOnly">If TRUE returns only the tweens with the given ID that are currently playing</param>
+        public static int TotalTweensById(object id, bool playingOnly = false)
+        {
+            if (id == null) return 0;
+
+            return TweenManager.TotalTweensById(id, playingOnly);
         }
 
         /// <summary>
@@ -984,7 +1137,8 @@ namespace DG.Tweening
         {
             InitCheck();
             TweenerCore<T1, T2, TPlugOptions> tweener = TweenManager.GetTweener<T1, T2, TPlugOptions>();
-            if (!Tweener.Setup(tweener, getter, setter, endValue, duration, plugin)) {
+            bool setupSuccessful = Tweener.Setup(tweener, getter, setter, endValue, duration, plugin);
+            if (!setupSuccessful) {
                 TweenManager.Despawn(tweener);
                 return null;
             }

@@ -23,7 +23,7 @@ namespace DG.Tweening.Plugins
     public class StringPlugin : ABSTweenPlugin<string, string, StringOptions>
     {
         static readonly StringBuilder _Buffer = new StringBuilder();
-        static readonly List<Char> _OpenedTags = new List<char>(); // Opened tags that need to be closed at the end, stored by first character required in closing tag
+        static readonly List<char> _OpenedTags = new List<char>(); // Opened tags that need to be closed at the end, stored by first character required in closing tag
 
         public override void SetFrom(TweenerCore<string, string, StringOptions> t, bool isRelative)
         {
@@ -32,10 +32,20 @@ namespace DG.Tweening.Plugins
             t.startValue = prevEndVal;
             t.setter(t.startValue);
         }
+        public override void SetFrom(TweenerCore<string, string, StringOptions> t, string fromValue, bool setImmediately, bool isRelative)
+        {
+            if (fromValue == null) fromValue = "";
+            if (isRelative) {
+                string currVal = t.getter();
+                fromValue += currVal;
+            }
+            t.startValue = fromValue;
+            if (setImmediately) t.setter(fromValue);
+        }
 
         public override void Reset(TweenerCore<string, string, StringOptions> t)
         {
-            t.startValue = t.endValue = t.changeValue = null;
+            t.startValue = t.endValue = t.changeValue = "";
         }
 
         public override string ConvertToStartValue(TweenerCore<string, string, StringOptions> t, string value)
@@ -53,8 +63,35 @@ namespace DG.Tweening.Plugins
             t.changeValue = t.endValue;
 
             // Store no-tags versions of values
-            t.plugOptions.startValueStrippedLength = Regex.Replace(t.startValue, @"<[^>]*>", "").Length;
-            t.plugOptions.changeValueStrippedLength = Regex.Replace(t.changeValue, @"<[^>]*>", "").Length;
+            bool emptyStartValue = string.IsNullOrEmpty(t.startValue);
+            bool emptyChangeValue = string.IsNullOrEmpty(t.changeValue);
+            t.plugOptions.startValueStrippedLength = emptyStartValue ? 0 : Regex.Replace(t.startValue, @"<[^>]*>", "").Length;
+            t.plugOptions.changeValueStrippedLength = emptyChangeValue ? 0 : Regex.Replace(t.changeValue, @"<[^>]*>", "").Length;
+            // Check if texts end with an open tag in which case consider it
+            int startValueFullLen = emptyStartValue ? 0 : t.startValue.Length;
+            int changeValueFullLen = emptyChangeValue ? 0 : t.changeValue.Length;
+            if (startValueFullLen > 3 && t.startValue[startValueFullLen - 1] == '>') {
+                for (int i = startValueFullLen - 3; i > -1; --i) {
+                    if (t.startValue[i] == '<') {
+                        if (t.startValue[i + 1] != '/') {
+                            // Start value ends with open tag
+                            t.plugOptions.startValueStrippedLength++;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (changeValueFullLen > 3 && t.changeValue[changeValueFullLen - 1] == '>') {
+                for (int i = changeValueFullLen - 3; i > -1; --i) {
+                    if (t.changeValue[i] == '<') {
+                        if (t.changeValue[i + 1] != '/') {
+                            // End value ends with open tag
+                            t.plugOptions.changeValueStrippedLength++;
+                        }
+                        break;
+                    }
+                }
+            }
         }
 
         public override float GetSpeedBasedDuration(StringOptions options, float unitsXSecond, string changeValue)
@@ -66,8 +103,11 @@ namespace DG.Tweening.Plugins
         }
 
         // ChangeValue is the same as endValue in this plugin
-        public override void EvaluateAndApply(StringOptions options, Tween t, bool isRelative, DOGetter<string> getter, DOSetter<string> setter, float elapsed, string startValue, string changeValue, float duration, bool usingInversePosition, UpdateNotice updateNotice)
-        {
+        public override void EvaluateAndApply(
+            StringOptions options, Tween t, bool isRelative, DOGetter<string> getter, DOSetter<string> setter,
+            float elapsed, string startValue, string changeValue, float duration, bool usingInversePosition, int newCompletedSteps,
+            UpdateNotice updateNotice
+        ){
             _Buffer.Remove(0, _Buffer.Length);
 
             // Incremental works only with relative tweens (otherwise the tween makes no sense)
@@ -82,7 +122,8 @@ namespace DG.Tweening.Plugins
                 }
             }
 
-            int startValueLen = options.richTextEnabled ? options.startValueStrippedLength : startValue.Length;
+            int startValueLen = options.richTextEnabled ? options.startValueStrippedLength
+                : string.IsNullOrEmpty(startValue) ? 0 : startValue.Length;
             int changeValueLen = options.richTextEnabled ? options.changeValueStrippedLength : changeValue.Length;
             int len = (int)Math.Round(changeValueLen * EaseManager.Evaluate(t.easeType, t.customEase, elapsed, duration, t.easeOvershootOrAmplitude, t.easePeriod));
             if (len > changeValueLen) len = changeValueLen;
@@ -115,7 +156,7 @@ namespace DG.Tweening.Plugins
             setter(_Buffer.ToString());
         }
 
-        // Manages eventual rich text, if enabled, readding tags to the given string and closing them when necessary
+        // Manages eventual rich text, if enabled, re-adding tags to the given string and closing them when necessary
         StringBuilder Append(string value, int startIndex, int length, bool richTextEnabled)
         {
             if (!richTextEnabled) {
@@ -130,6 +171,7 @@ namespace DG.Tweening.Plugins
             int fullLen = value.Length;
             int i;
             for (i = 0; i < length; ++i) {
+                if (i > fullLen - 1) break; // Happens when string ends with an open tag
                 char c = value[i];
                 if (c == '<') {
                     bool hadOpenTag = hasOpenTag;

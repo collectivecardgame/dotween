@@ -29,6 +29,23 @@ namespace DG.Tweening.Plugins
             else to.a = t.startValue.a;
             t.setter(to);
         }
+        public override void SetFrom(TweenerCore<Color, Color, ColorOptions> t, Color fromValue, bool setImmediately, bool isRelative)
+        {
+            if (isRelative) {
+                Color currVal = t.getter();
+                t.endValue += currVal;
+                fromValue += currVal;
+            }
+            t.startValue = fromValue;
+            if (setImmediately) {
+                Color to = fromValue;
+                if (t.plugOptions.alphaOnly) {
+                    to = t.getter();
+                    to.a = fromValue.a;
+                }
+                t.setter(to);
+            }
+        }
 
         public override Color ConvertToStartValue(TweenerCore<Color, Color, ColorOptions> t, Color value)
         {
@@ -50,8 +67,11 @@ namespace DG.Tweening.Plugins
             return 1f / unitsXSecond;
         }
 
-        public override void EvaluateAndApply(ColorOptions options, Tween t, bool isRelative, DOGetter<Color> getter, DOSetter<Color> setter, float elapsed, Color startValue, Color changeValue, float duration, bool usingInversePosition, UpdateNotice updateNotice)
-        {
+        public override void EvaluateAndApply(
+            ColorOptions options, Tween t, bool isRelative, DOGetter<Color> getter, DOSetter<Color> setter,
+            float elapsed, Color startValue, Color changeValue, float duration, bool usingInversePosition, int newCompletedSteps,
+            UpdateNotice updateNotice
+        ){
             if (t.loopType == LoopType.Incremental) startValue += changeValue * (t.isComplete ? t.completedLoops - 1 : t.completedLoops);
             if (t.isSequenced && t.sequenceParent.loopType == LoopType.Incremental) {
                 startValue += changeValue * (t.loopType == LoopType.Incremental ? t.loops : 1)

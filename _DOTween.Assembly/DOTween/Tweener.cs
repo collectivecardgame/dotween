@@ -150,14 +150,30 @@ namespace DG.Tweening
                 // Take start value from current target value
                 if (DOTween.useSafeMode) {
                     try {
-                        t.startValue = t.tweenPlugin.ConvertToStartValue(t, t.getter());
+                        if (t.isFrom) {
+                            // From tween without forced From value and where setImmediately was FALSE
+                            // (contrary to other forms of From tweens its values will be set at startup)
+                            t.SetFrom(t.isRelative && !t.isBlendable);
+                            t.isRelative = false;
+                        } else t.startValue = t.tweenPlugin.ConvertToStartValue(t, t.getter());
                     } catch (Exception e) {
-                        Debugger.LogWarning(string.Format(
-                            "Tween startup failed (NULL target/property - {0}): the tween will now be killed ► {1}", e.TargetSite, e.Message
-                        ));
+                        if (Debugger.ShouldLogSafeModeCapturedError()) {
+                            Debugger.LogSafeModeCapturedError(string.Format(
+                                "Tween startup failed (NULL target/property - {0}): the tween will now be killed ► {1}", e.TargetSite, e.Message
+                            ), t);
+                        }
+                        DOTween.safeModeReport.Add(SafeModeReport.SafeModeReportType.StartupFailure);
                         return false; // Target/field doesn't exist: kill tween
                     }
-                } else t.startValue = t.tweenPlugin.ConvertToStartValue(t, t.getter());
+                } else {
+                    if (t.isFrom) {
+                        // From tween without forced From value and where setImmediately was FALSE
+                        // (contrary to other forms of From tweens its values will be set at startup)
+                        t.SetFrom(t.isRelative && !t.isBlendable);
+                        t.isRelative = false;
+                    }
+                    else t.startValue = t.tweenPlugin.ConvertToStartValue(t, t.getter());
+                }
             }
 
             if (t.isRelative) t.tweenPlugin.SetRelativeEndValue(t);
@@ -174,7 +190,7 @@ namespace DG.Tweening
         }
 
         // CALLED BY TweenerCore
-        internal static Tweener DoChangeStartValue<T1, T2, TPlugOptions>(
+        internal static TweenerCore<T1, T2, TPlugOptions> DoChangeStartValue<T1, T2, TPlugOptions>(
             TweenerCore<T1, T2, TPlugOptions> t, T2 newStartValue, float newDuration
         ) where TPlugOptions : struct, IPlugOptions
         {
@@ -200,7 +216,7 @@ namespace DG.Tweening
         }
 
         // CALLED BY TweenerCore
-        internal static Tweener DoChangeEndValue<T1, T2, TPlugOptions>(
+        internal static TweenerCore<T1, T2, TPlugOptions> DoChangeEndValue<T1, T2, TPlugOptions>(
             TweenerCore<T1, T2, TPlugOptions> t, T2 newEndValue, float newDuration, bool snapStartValue
         ) where TPlugOptions : struct, IPlugOptions
         {
@@ -216,9 +232,15 @@ namespace DG.Tweening
                     if (DOTween.useSafeMode) {
                         try {
                             t.startValue = t.tweenPlugin.ConvertToStartValue(t, t.getter());
-                        } catch {
+                        } catch (Exception e) {
                             // Target/field doesn't exist: kill tween
+                            if (Debugger.ShouldLogSafeModeCapturedError()) {
+                                Debugger.LogSafeModeCapturedError(string.Format(
+                                    "Target or field is missing/null ({0}) ► {1}\n\n{2}\n\n", e.TargetSite, e.Message, e.StackTrace
+                                ), t);
+                            }
                             TweenManager.Despawn(t);
+                            DOTween.safeModeReport.Add(SafeModeReport.SafeModeReportType.TargetOrFieldMissing);
                             return null;
                         }
                     } else t.startValue = t.tweenPlugin.ConvertToStartValue(t, t.getter());
@@ -237,7 +259,7 @@ namespace DG.Tweening
             return t;
         }
 
-        internal static Tweener DoChangeValues<T1, T2, TPlugOptions>(
+        internal static TweenerCore<T1, T2, TPlugOptions> DoChangeValues<T1, T2, TPlugOptions>(
             TweenerCore<T1, T2, TPlugOptions> t, T2 newStartValue, T2 newEndValue, float newDuration
         ) where TPlugOptions : struct, IPlugOptions
         {

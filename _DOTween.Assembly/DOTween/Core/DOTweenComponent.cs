@@ -25,7 +25,9 @@ namespace DG.Tweening.Core
         float _unscaledTime;
         float _unscaledDeltaTime;
 
+        bool _paused; // Used to mark when app is paused and to avoid resume being called when application starts playing
         float _pausedTime; // Marks the time when Unity was paused
+        bool _isQuitting;
 
         bool _duplicateToDestroy;
 
@@ -35,7 +37,9 @@ namespace DG.Tweening.Core
         {
             if (DOTween.instance == null) DOTween.instance = this;
             else {
-                Debugger.LogWarning("Duplicate DOTweenComponent instance found in scene: destroying it");
+                if (Debugger.logPriority >= 1) {
+                    Debugger.LogWarning("Duplicate DOTweenComponent instance found in scene: destroying it");
+                }
                 Destroy(this.gameObject);
                 return;
             }
@@ -44,7 +48,7 @@ namespace DG.Tweening.Core
             _unscaledTime = Time.realtimeSinceStartup;
 
             // Initialize DOTweenModuleUtils via Reflection
-            Type modules = Utils.GetLooseScriptType("DG.Tweening.DOTweenModuleUtils");
+            Type modules = DOTweenUtils.GetLooseScriptType("DG.Tweening.DOTweenModuleUtils");
             if (modules == null) {
                 Debugger.LogError("Couldn't load Modules system");
                 return;
@@ -68,7 +72,7 @@ namespace DG.Tweening.Core
             _unscaledDeltaTime = Time.realtimeSinceStartup - _unscaledTime;
             if (DOTween.useSmoothDeltaTime && _unscaledDeltaTime > DOTween.maxSmoothUnscaledTime) _unscaledDeltaTime = DOTween.maxSmoothUnscaledTime;
             if (TweenManager.hasActiveDefaultTweens) {
-                TweenManager.Update(UpdateType.Normal, (DOTween.useSmoothDeltaTime ? Time.smoothDeltaTime : Time.deltaTime) * DOTween.timeScale, _unscaledDeltaTime * DOTween.timeScale);
+                TweenManager.Update(UpdateType.Normal, (DOTween.useSmoothDeltaTime ? Time.smoothDeltaTime : Time.deltaTime) * DOTween.timeScale, _unscaledDeltaTime * DOTween.unscaledTimeScale * DOTween.timeScale);
             }
             _unscaledTime = Time.realtimeSinceStartup;
 
@@ -84,14 +88,14 @@ namespace DG.Tweening.Core
         void LateUpdate()
         {
             if (TweenManager.hasActiveLateTweens) {
-                TweenManager.Update(UpdateType.Late, (DOTween.useSmoothDeltaTime ? Time.smoothDeltaTime : Time.deltaTime) * DOTween.timeScale, _unscaledDeltaTime * DOTween.timeScale);
+                TweenManager.Update(UpdateType.Late, (DOTween.useSmoothDeltaTime ? Time.smoothDeltaTime : Time.deltaTime) * DOTween.timeScale, _unscaledDeltaTime * DOTween.unscaledTimeScale * DOTween.timeScale);
             }
         }
 
         void FixedUpdate()
         {
             if (TweenManager.hasActiveFixedTweens && Time.timeScale > 0) {
-                TweenManager.Update(UpdateType.Fixed, (DOTween.useSmoothDeltaTime ? Time.smoothDeltaTime : Time.deltaTime) * DOTween.timeScale, ((DOTween.useSmoothDeltaTime ? Time.smoothDeltaTime : Time.deltaTime) / Time.timeScale) * DOTween.timeScale);
+                TweenManager.Update(UpdateType.Fixed, (DOTween.useSmoothDeltaTime ? Time.smoothDeltaTime : Time.deltaTime) * DOTween.timeScale, ((DOTween.useSmoothDeltaTime ? Time.smoothDeltaTime : Time.deltaTime) / Time.timeScale) * DOTween.unscaledTimeScale * DOTween.timeScale);
             }
         }
 
@@ -127,23 +131,54 @@ namespace DG.Tweening.Core
                 string s = "Max overall simultaneous active Tweeners/Sequences: " + DOTween.maxActiveTweenersReached + "/" + DOTween.maxActiveSequencesReached;
                 Debugger.LogReport(s);
             }
+
+            if (DOTween.useSafeMode) {
+                int totSafeModeErrors = DOTween.safeModeReport.GetTotErrors();
+                if (totSafeModeErrors > 0) {
+                    string s = string.Format("DOTween's safe mode captured {0} errors." +
+                                             " This is usually ok (it's what safe mode is there for) but if your game is encountering issues" +
+                                             " you should set Log Behaviour to Default in DOTween Utility Panel in order to get detailed" +
+                                             " warnings when an error is captured (consider that these errors are always on the user side).",
+                        totSafeModeErrors
+                    );
+                    if (DOTween.safeModeReport.totMissingTargetOrFieldErrors > 0) {
+                        s += "\n- " + DOTween.safeModeReport.totMissingTargetOrFieldErrors + " missing target or field errors";
+                    }
+                    if (DOTween.safeModeReport.totStartupErrors > 0) {
+                        s += "\n- " + DOTween.safeModeReport.totStartupErrors + " startup errors";
+                    }
+                    if (DOTween.safeModeReport.totCallbackErrors > 0) {
+                        s += "\n- " + DOTween.safeModeReport.totCallbackErrors + " errors inside callbacks (these might be important)";
+                    }
+                    if (DOTween.safeModeReport.totUnsetErrors > 0) {
+                        s += "\n- " + DOTween.safeModeReport.totUnsetErrors + " undetermined errors (these might be important)";
+                    }
+                    Debugger.LogSafeModeReport(s);
+                }
+            }
+
 //            DOTween.initialized = false;
 //            DOTween.instance = null;
+
             if (DOTween.instance == this) DOTween.instance = null;
+            DOTween.Clear(true, _isQuitting);
         }
 
         // Detract/reapply pause time from/to unscaled time
         public void OnApplicationPause(bool pauseStatus)
         {
             if (pauseStatus) {
+                _paused = true;
                 _pausedTime = Time.realtimeSinceStartup;
-            } else {
+            } else if (_paused) {
+                _paused = false;
                 _unscaledTime += Time.realtimeSinceStartup - _pausedTime;
             }
         }
 
         void OnApplicationQuit()
         {
+            _isQuitting = true;
             DOTween.isQuitting = true;
         }
 

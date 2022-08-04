@@ -39,6 +39,22 @@ namespace DG.Tweening.Plugins
             }
             t.setter(t.startValue);
         }
+        public override void SetFrom(TweenerCore<RectOffset, RectOffset, NoOptions> t, RectOffset fromValue, bool setImmediately, bool isRelative)
+        {
+            if (isRelative) {
+                RectOffset currVal = t.getter();
+                t.endValue.left += currVal.left;
+                t.endValue.right += currVal.right;
+                t.endValue.top += currVal.top;
+                t.endValue.bottom += currVal.bottom;
+                fromValue.left += currVal.left;
+                fromValue.right += currVal.right;
+                fromValue.top += currVal.top;
+                fromValue.bottom += currVal.bottom;
+            }
+            t.startValue = fromValue;
+            if (setImmediately) t.setter(fromValue);
+        }
 
         public override RectOffset ConvertToStartValue(TweenerCore<RectOffset, RectOffset, NoOptions> t, RectOffset value)
         {
@@ -74,8 +90,11 @@ namespace DG.Tweening.Plugins
             return diag / unitsXSecond;
         }
 
-        public override void EvaluateAndApply(NoOptions options, Tween t, bool isRelative, DOGetter<RectOffset> getter, DOSetter<RectOffset> setter, float elapsed, RectOffset startValue, RectOffset changeValue, float duration, bool usingInversePosition, UpdateNotice updateNotice)
-        {
+        public override void EvaluateAndApply(
+            NoOptions options, Tween t, bool isRelative, DOGetter<RectOffset> getter, DOSetter<RectOffset> setter,
+            float elapsed, RectOffset startValue, RectOffset changeValue, float duration, bool usingInversePosition, int newCompletedSteps,
+            UpdateNotice updateNotice
+        ){
             _r.left = startValue.left;
             _r.right = startValue.right;
             _r.top = startValue.top;

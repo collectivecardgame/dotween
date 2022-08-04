@@ -38,7 +38,10 @@ namespace DG.Tweening
 
         internal static Sequence DoPrepend(Sequence inSequence, Tween t)
         {
-            if (t.loops == -1) t.loops = 1;
+            if (t.loops == -1) {
+                t.loops = int.MaxValue;
+                Debugger.LogWarning("Infinite loops aren't allowed inside a Sequence (only on the Sequence itself) and will be changed to int.MaxValue", t);
+            }
             float tFullTime = t.delay + (t.duration * t.loops);
 //            float tFullTime = t.duration * t.loops;
             inSequence.duration += tFullTime;
@@ -62,12 +65,18 @@ namespace DG.Tweening
 
             t.isSequenced = t.creationLocked = true;
             t.sequenceParent = inSequence;
-            if (t.loops == -1) t.loops = 1;
+            if (t.loops == -1) {
+                t.loops = int.MaxValue;
+                Debugger.LogWarning("Infinite loops aren't allowed inside a Sequence (only on the Sequence itself) and will be changed to int.MaxValue", t);
+            }
             float tFullTime = t.duration * t.loops;
             t.autoKill = false;
             t.delay = t.elapsedDelay = 0;
             t.delayComplete = true;
-            t.isSpeedBased = false;
+            if (t.isSpeedBased) {
+                t.isSpeedBased = false;
+                Debugger.LogWarning("SpeedBased tweens are not allowed inside a Sequence: interpreting speed as duration", t);
+            }
             t.sequencedPosition = atPosition;
             t.sequencedEndPosition = atPosition + tFullTime;
 
@@ -110,6 +119,20 @@ namespace DG.Tweening
         }
 
         #endregion
+
+        // NOTE: up to v1.2.340 Sequences didn't implement this method and delays were always included as prepended intervals
+        internal override float UpdateDelay(float elapsed)
+        {
+            float tweenDelay = delay;
+            if (elapsed > tweenDelay) {
+                // Delay complete
+                elapsedDelay = tweenDelay;
+                delayComplete = true;
+                return elapsed - tweenDelay;
+            }
+            elapsedDelay = elapsed;
+            return 0;
+        }
 
         internal override void Reset()
         {
@@ -158,10 +181,10 @@ namespace DG.Tweening
         // Returns TRUE in case of success
         internal static bool DoStartup(Sequence s)
         {
-            if (s.sequencedTweens.Count == 0 && s._sequencedObjs.Count == 0
-                && s.onComplete == null && s.onKill == null && s.onPause == null && s.onPlay == null && s.onRewind == null
-                && s.onStart == null && s.onStepComplete == null && s.onUpdate == null
-            ) return false; // Empty Sequence without any callback set
+            int sequencedObjsLen = s._sequencedObjs.Count;
+            if (s.sequencedTweens.Count == 0 && sequencedObjsLen == 0 && !IsAnyCallbackSet(s)) {
+                return false; // Empty Sequence without any callback set
+            }
 
             s.startupDone = true;
             s.fullDuration = s.loops > -1 ? s.duration * s.loops : Mathf.Infinity;
@@ -175,6 +198,17 @@ namespace DG.Tweening
                     if (!s.isBlendable) s.sequencedTweens[i].isRelative = true;
                 }
             }
+            if (s.isInverted) {
+                // Complete all tweens on startup and invert them, so that we can start from the end
+                for (int i = 0; i < sequencedObjsLen; i++) {
+                    ABSSequentiable sequentiable = s._sequencedObjs[i];
+                    if (sequentiable.tweenType == TweenType.Tweener) {
+                        Tween t = (Tween)sequentiable;
+                        TweenManager.Goto(t, t.duration * t.loops, false, UpdateMode.IgnoreOnComplete);
+                        t.isInverted = true;
+                    }
+                }
+            }
             return true;
         }
 
@@ -185,19 +219,20 @@ namespace DG.Tweening
             // Adapt to eventual ease position
             float prevPos = prevPosition;
             float newPos = s.position;
+            if (s.isInverted) useInversePosition = !useInversePosition;
             if (s.easeType != Ease.Linear) {
                 prevPos = s.duration * EaseManager.Evaluate(s.easeType, s.customEase, prevPos, s.duration, s.easeOvershootOrAmplitude, s.easePeriod);
                 newPos = s.duration * EaseManager.Evaluate(s.easeType, s.customEase, newPos, s.duration, s.easeOvershootOrAmplitude, s.easePeriod);
             }
 
-
             float from, to = 0;
             // Determine if prevPos was inverse.
             // Used to calculate correct "from" value when applying internal cycle
             // and also in case of multiple loops within a single update
-            bool prevPosIsInverse = s.loopType == LoopType.Yoyo
+            bool prevPosIsInverse = (s.loops == -1 || s.loops > 1) && s.loopType == LoopType.Yoyo
                 && (prevPos < s.duration ? prevCompletedLoops % 2 != 0 : prevCompletedLoops % 2 == 0);
             if (s.isBackwards) prevPosIsInverse = !prevPosIsInverse;
+            if (s.isInverted) prevPosIsInverse = !prevPosIsInverse;
             // Update multiple loop cycles within the same update
             if (newCompletedSteps > 0) {
 //                Debug.Log(Time.frameCount + " <color=#FFEC03>newCompletedSteps = " + newCompletedSteps + "</color> - completedLoops: " + s.completedLoops + " - updateMode: " + updateMode);
@@ -216,14 +251,14 @@ namespace DG.Tweening
                         to = prevPosIsInverse ? 0 : s.duration;
                         if (ApplyInternalCycle(s, from, to, updateMode, useInversePosition, prevPosIsInverse, true)) return true;
                         cyclesDone++;
-                        if (s.loopType == LoopType.Yoyo) prevPosIsInverse = !prevPosIsInverse;
+                        if (s.hasLoops && s.loopType == LoopType.Yoyo) prevPosIsInverse = !prevPosIsInverse;
                     }
                     // If completedLoops or position were changed by some callback, exit here
 //                    Debug.Log("     Internal Cycle Ended > expecteCompletedLoops/completedLoops: " + expectedCompletedLoops + "/" + s.completedLoops + " - expectedPosition/position: " + expectedPosition + "/" + s.position);
                     if (expectedCompletedLoops != s.completedLoops || Math.Abs(expectedPosition - s.position) > Single.Epsilon) return !s.active;
                 } else {
                     // Simply determine correct prevPosition after steps
-                    if (s.loopType == LoopType.Yoyo && newCompletedSteps % 2 != 0) {
+                    if (s.hasLoops && s.loopType == LoopType.Yoyo && newCompletedSteps % 2 != 0) {
                         prevPosIsInverse = !prevPosIsInverse;
                         prevPos = s.duration - prevPos;
                     }
@@ -246,18 +281,20 @@ namespace DG.Tweening
         // Returns TRUE if the tween needs to be killed
         static bool ApplyInternalCycle(Sequence s, float fromPos, float toPos, UpdateMode updateMode, bool useInverse, bool prevPosIsInverse, bool multiCycleStep = false)
         {
+            bool wasPlaying = s.isPlaying; // Used to interrupt for loops in case a callback pauses a running Sequence
             bool isBackwardsUpdate = toPos < fromPos;
 //            Debug.Log(Time.frameCount + " " + s.id + " " + (multiCycleStep ? "<color=#FFEC03>Multicycle</color> > " : "Cycle > ") + s.position + "/" + s.duration + " - s.isBackwards: " + s.isBackwards + ", useInverse/prevInverse: " + useInverse + "/" + prevPosIsInverse + " - " + fromPos + " > " + toPos + " - UpdateMode: " + updateMode + ", isPlaying: " + s.isPlaying + ", completedLoops: " + s.completedLoops);
             if (isBackwardsUpdate) {
                 int len = s._sequencedObjs.Count - 1;
                 for (int i = len; i > -1; --i) {
                     if (!s.active) return true; // Killed by some internal callback
+                    if (!s.isPlaying && wasPlaying) return false; // Paused by internal callback
                     ABSSequentiable sequentiable = s._sequencedObjs[i];
                     if (sequentiable.sequencedEndPosition < toPos || sequentiable.sequencedPosition > fromPos) continue;
                     if (sequentiable.tweenType == TweenType.Callback) {
                         if (updateMode == UpdateMode.Update && prevPosIsInverse) {
 //                            Debug.Log("<color=#FFEC03>BACKWARDS Callback > " + s.id + " - s.isBackwards: " + s.isBackwards + ", useInverse/prevInverse: " + useInverse + "/" + prevPosIsInverse + " - " + fromPos + " > " + toPos + "</color>");
-                            OnTweenCallback(sequentiable.onStart);
+                            OnTweenCallback(sequentiable.onStart, s);
                         }
                     } else {
                         // Nested Tweener/Sequence
@@ -267,11 +304,16 @@ namespace DG.Tweening
                         Tween t = (Tween)sequentiable;
                         if (!t.startupDone) continue; // since we're going backwards and this tween never started just ignore it
                         t.isBackwards = true;
+                        if (s.isInverted) gotoPos = t.fullDuration - gotoPos;
                         if (TweenManager.Goto(t, gotoPos, false, updateMode)) {
-                            // Nested tween failed. Remove it from Sequence and continue
-                            // (instead of just returning TRUE, which would kill the whole Sequence as before v1.2.060)
+                            // Nested tween failed. If it's the only tween and there's no callbacks mark for killing the whole sequence
+                            // (default behaviour in any case prior to v1.2.060)...
+                            if (DOTween.nestedTweenFailureBehaviour == NestedTweenFailureBehaviour.KillWholeSequence) return true;
+                            if (s.sequencedTweens.Count == 1 && s._sequencedObjs.Count == 1 && !IsAnyCallbackSet(s)) return true;
+                            // ...otherwise remove failed tween from Sequence and continue
                             TweenManager.Despawn(t, false);
                             s._sequencedObjs.RemoveAt(i);
+                            s.sequencedTweens.Remove(t);
                             --i; --len;
                             continue;
                         }
@@ -293,6 +335,7 @@ namespace DG.Tweening
                 int len = s._sequencedObjs.Count;
                 for (int i = 0; i < len; ++i) {
                     if (!s.active) return true; // Killed by some internal callback
+                    if (!s.isPlaying && wasPlaying) return false; // Paused by internal callback
                     ABSSequentiable sequentiable = s._sequencedObjs[i];
 //                    if (sequentiable.sequencedPosition > toPos || sequentiable.sequencedEndPosition < fromPos) continue;
                     // Fix rare case with high FPS when a tween/callback might happen in same exact time as it's set
@@ -307,7 +350,7 @@ namespace DG.Tweening
 //                            Debug.Log("<color=#FFEC03>FORWARD Callback > " + s.id + " - s.isBackwards: " + s.isBackwards + ", useInverse/prevInverse: " + useInverse + "/" + prevPosIsInverse + " - " + fromPos + " > " + toPos + "</color>");
                             bool fire = !s.isBackwards && !useInverse && !prevPosIsInverse
                                 || s.isBackwards && useInverse && !prevPosIsInverse;
-                            if (fire) OnTweenCallback(sequentiable.onStart);
+                            if (fire) OnTweenCallback(sequentiable.onStart, s);
                         }
                     } else {
                         // Nested Tweener/Sequence
@@ -322,11 +365,16 @@ namespace DG.Tweening
                         }
                         //
                         t.isBackwards = false;
+                        if (s.isInverted) gotoPos = t.fullDuration - gotoPos;
                         if (TweenManager.Goto(t, gotoPos, false, updateMode)) {
-                            // Nested tween failed. Remove it from Sequence and continue
-                            // (instead of just returning TRUE, which would kill the whole Sequence as before v1.2.060)
+                            // Nested tween failed. If it's the only tween and there's no callbacks mark for killing the whole sequence
+                            // (default behaviour in any case prior to v1.2.060)...
+                            if (DOTween.nestedTweenFailureBehaviour == NestedTweenFailureBehaviour.KillWholeSequence) return true;
+                            if (s.sequencedTweens.Count == 1 && s._sequencedObjs.Count == 1 && !IsAnyCallbackSet(s)) return true;
+                            // ...otherwise remove failed tween from Sequence and continue
                             TweenManager.Despawn(t, false);
                             s._sequencedObjs.RemoveAt(i);
+                            s.sequencedTweens.Remove(t);
                             --i; --len;
                             continue;
                         }
@@ -360,6 +408,12 @@ namespace DG.Tweening
                 }
                 list[j] = temp;
             }
+        }
+
+        static bool IsAnyCallbackSet(Sequence s)
+        {
+            return s.onComplete != null || s.onKill != null || s.onPause != null || s.onPlay != null || s.onRewind != null
+                   || s.onStart != null || s.onStepComplete != null || s.onUpdate != null;
         }
 
 //        // Quicker but doesn't implement stable sort
